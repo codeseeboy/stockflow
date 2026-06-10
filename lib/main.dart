@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'config/supabase_config.dart';
 import 'data/app_store.dart';
 import 'data/supabase_service.dart';
+import 'models/models.dart';
 import 'screens/admin/admin_shell.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/customer/customer_app.dart';
@@ -90,18 +91,17 @@ class _WebSplashScreenState extends State<WebSplashScreen> {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
 
+    // The website is the admin console only — customers use the mobile app.
     final admin = SavedAdminSession.load();
     Widget next;
 
     if (!SupabaseConfig.isConfigured) {
-      next = admin != null ? AdminShell(role: admin.role) : const EntryScreen();
-    } else if (admin != null && store.isSignedIn) {
-      final role = await store.currentRole() ?? admin.role;
+      next = AdminShell(role: admin?.role ?? UserRole.admin);
+    } else if (store.isSignedIn) {
+      final role = await store.currentRole() ?? admin?.role ?? UserRole.admin;
       next = AdminShell(role: role);
-    } else if (admin != null) {
-      next = LoginScreen(fallbackRole: admin.role, initialEmail: admin.email);
     } else {
-      next = const EntryScreen();
+      next = LoginScreen(fallbackRole: admin?.role ?? UserRole.admin, initialEmail: admin?.email);
     }
 
     if (!mounted) return;

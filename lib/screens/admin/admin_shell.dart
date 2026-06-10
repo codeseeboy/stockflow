@@ -7,6 +7,7 @@ import '../../main.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/ui_kit.dart';
+import '../auth/login_screen.dart';
 import '../entry_screen.dart';
 import 'analytics_screen.dart';
 import 'cycles_screen.dart';
@@ -222,8 +223,13 @@ class _SideNav extends StatelessWidget {
                     onPressed: () async {
                       await context.read<AppStore>().signOut();
                       if (!context.mounted) return;
+                      // Web = admin console only → back to the staff login.
                       Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => const EntryScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => kIsWeb
+                              ? const LoginScreen(fallbackRole: UserRole.admin)
+                              : const EntryScreen(),
+                        ),
                         (_) => false,
                       );
                     },
