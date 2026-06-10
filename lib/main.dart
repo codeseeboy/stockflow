@@ -10,7 +10,7 @@ import 'models/models.dart';
 import 'screens/admin/admin_shell.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/customer/customer_app.dart';
-import 'screens/customer/customer_auth.dart' show CustomerRegister;
+import 'screens/customer/customer_auth.dart' show CustomerRegister, CustomerWelcome;
 import 'screens/entry_screen.dart';
 import 'theme/app_theme.dart';
 import 'data/food_icon_brain_loader.dart';
@@ -31,6 +31,13 @@ class ThemeController extends ChangeNotifier {
     mode = isDark ? ThemeMode.light : ThemeMode.dark;
     notifyListeners();
   }
+}
+
+/// True when the website was opened via a shared order link (e.g. /c/abc123),
+/// meaning a customer — not staff — landed here and should see the order flow.
+bool _isCustomerOrderLink() {
+  final seg = Uri.base.pathSegments;
+  return seg.isNotEmpty && seg.first == 'c';
 }
 
 class StockFlowApp extends StatelessWidget {
@@ -59,8 +66,11 @@ class StockFlowApp extends StatelessWidget {
           theme: AppTheme.light(),
           darkTheme: AppTheme.dark(),
           themeMode: theme.mode,
-          // The app is the customer app; the website is the admin/role chooser.
-          home: kIsWeb ? const WebSplashScreen() : const SplashScreen(),
+          // Website root = admin console. A shared order link (/c/<token>) on the
+          // web opens the customer ordering flow instead. The app = customer.
+          home: kIsWeb
+              ? (_isCustomerOrderLink() ? const CustomerWelcome() : const WebSplashScreen())
+              : const SplashScreen(),
         ),
       ),
     );

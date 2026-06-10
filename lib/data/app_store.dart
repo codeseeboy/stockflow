@@ -567,7 +567,7 @@ class AppStore extends ChangeNotifier {
   void closeCycle(OrderCycle cycle) {
     cycle.status = CycleStatus.closed;
     notifyListeners();
-    _fire(_sb?.updateCycleStatus(cycle.id, CycleStatus.closed));
+    _fire(_sb?.updateCycleStatus(cycle.id, CycleStatus.closed).then((_) => reload()));
   }
 
   // ---- Helpers ------------------------------------------------------------

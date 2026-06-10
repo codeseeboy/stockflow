@@ -20,4 +20,8 @@ class SupabaseConfig {
       !url.contains('YOUR_') &&
       anonKey.length > 30 &&
       !anonKey.contains('YOUR_');
+
+  /// Public website base (Vercel) — used to build the customer order link.
+  /// Update this if you rename the Vercel deployment.
+  static const String publicWebBase = 'https://stockflow-sjcem.vercel.app';
 }

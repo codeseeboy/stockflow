@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/supabase_config.dart';
 import '../theme/app_theme.dart';
 
 enum UserRole { admin, worker, customer }
@@ -101,7 +102,7 @@ class OrderCycle {
     required this.shareToken,
   });
 
-  String get link => 'https://order.stockflow.app/c/$shareToken';
+  String get link => '${SupabaseConfig.publicWebBase}/c/$shareToken';
 }
 
 class OrderLine {

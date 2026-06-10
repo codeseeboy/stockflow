@@ -21,8 +21,10 @@ class CyclesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final active = store.activeCycle;
-    final past = store.cycles.where((c) => c.id != active.id).toList();
+    // The genuinely OPEN cycle (if any) — not just the latest one.
+    final cyclesByRecent = store.cyclesByRecent;
+    final openCycle = cyclesByRecent.where((c) => c.status == CycleStatus.open).firstOrNull;
+    final past = cyclesByRecent.where((c) => c.id != openCycle?.id).toList();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -45,7 +47,10 @@ class CyclesScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 18),
-              _ActiveCard(store: store, cycle: active, range: _range(active)),
+              if (openCycle != null)
+                _ActiveCard(store: store, cycle: openCycle, range: _range(openCycle))
+              else
+                const _NoLiveLinkCard(),
               const SizedBox(height: 24),
               Text('Past weeks', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
@@ -60,6 +65,38 @@ class CyclesScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Shown when no order window is open — prompts the admin to start one.
+class _NoLiveLinkCard extends StatelessWidget {
+  const _NoLiveLinkCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return AppCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(AppRadius.lg)),
+            child: Icon(Icons.link_off_rounded, color: scheme.onSurfaceVariant, size: 28),
+          ),
+          const SizedBox(height: 14),
+          Text('No order window is open', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text(
+            'Customers cannot place orders right now. Generate a new weekly link to open ordering.',
+            textAlign: TextAlign.center,
+            style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+        ],
       ),
     );
   }
@@ -173,13 +210,19 @@ class _ActiveCard extends StatelessWidget {
   }
 
   Future<void> _notify(BuildContext context, AppStore store) async {
+    const body = 'Place your weekly order before the window closes.';
     final result = await showNotifyCustomersSheet(
       context,
       title: '${cycle.title} order link is open',
-      body: 'Place your weekly order before the window closes.',
+      body: body,
     );
     if (result != null && context.mounted) {
-      await showBroadcastDeliveryDialog(context, result);
+      await showBroadcastDeliveryDialog(
+        context,
+        result,
+        message: '${cycle.title} order link is open. $body Order here: ${cycle.link}',
+        subject: 'StockFlow — ${cycle.title} order window is open',
+      );
     }
   }
 }
