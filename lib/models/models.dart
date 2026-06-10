@@ -194,6 +194,7 @@ class BroadcastResult {
   final int smsCount;
   final int whatsappCount;
   final int emailCount;
+  final bool autoEmailed; // true when emails were sent server-side automatically
   final List<DeliveryLogEntry> logs;
 
   const BroadcastResult({
@@ -201,6 +202,7 @@ class BroadcastResult {
     required this.smsCount,
     required this.whatsappCount,
     this.emailCount = 0,
+    this.autoEmailed = false,
     this.logs = const [],
   });
 

@@ -366,11 +366,11 @@ class AppStore extends ChangeNotifier {
     ));
     notifyListeners();
     if (notifyCustomers) {
-      broadcastToCustomers(
+      unawaited(broadcastToCustomers(
         title: 'New item available',
         body: '$icon $name is now on the order list.',
         itemEmoji: icon,
-      );
+      ));
     }
     final sb = _sb;
     if (sb != null) {
@@ -381,7 +381,9 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Send a notification blast to all registered customers.
-  BroadcastResult broadcastToCustomers({
+  /// In-app + push are instant. Email is sent automatically server-side via the
+  /// `send-broadcast-email` Edge Function (Gmail SMTP) when live + configured.
+  Future<BroadcastResult> broadcastToCustomers({
     required String title,
     required String body,
     bool inApp = true,
@@ -389,7 +391,7 @@ class AppStore extends ChangeNotifier {
     bool whatsapp = true,
     bool email = true,
     String? itemEmoji,
-  }) {
+  }) async {
     final customers = users.where((u) => u.role == UserRole.customer).toList();
     final count = customers.length;
     final logs = <DeliveryLogEntry>[
@@ -421,11 +423,24 @@ class AppStore extends ChangeNotifier {
     if (sb != null) {
       _fire(sb.insertBroadcast(broadcast).then((_) => reload()).catchError((Object _) {}));
     }
+
+    // Automatic email delivery via the Edge Function. Silently falls back to the
+    // manual "Email all" button if the function isn't deployed/configured yet.
+    var autoEmailed = 0;
+    if (email && sb != null) {
+      try {
+        autoEmailed = await sb.sendBroadcastEmail(title, body);
+      } catch (_) {
+        autoEmailed = 0;
+      }
+    }
+
     return BroadcastResult(
       inAppCount: inApp ? count : 0,
       smsCount: sms ? logs.where((l) => l.smsDelivered).length : 0,
       whatsappCount: whatsapp ? logs.where((l) => l.whatsappDelivered).length : 0,
-      emailCount: email ? logs.where((l) => l.emailDelivered).length : 0,
+      emailCount: email ? (autoEmailed > 0 ? autoEmailed : logs.where((l) => l.emailDelivered).length) : 0,
+      autoEmailed: autoEmailed > 0,
       logs: logs,
     );
   }

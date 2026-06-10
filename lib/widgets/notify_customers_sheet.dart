@@ -176,7 +176,7 @@ class _NotifyCustomersSheetState extends State<_NotifyCustomersSheet> {
                       final ok = await _confirmSend(context, customers, _inApp, _sms, _whatsapp, _email);
                       if (!ok || !context.mounted) return;
                       setState(() => _sending = true);
-                      final result = store.broadcastToCustomers(
+                      final result = await store.broadcastToCustomers(
                         title: widget.title,
                         body: widget.body,
                         inApp: _inApp,
@@ -185,7 +185,6 @@ class _NotifyCustomersSheetState extends State<_NotifyCustomersSheet> {
                         email: _email,
                         itemEmoji: widget.itemEmoji,
                       );
-                      await Future<void>.delayed(const Duration(milliseconds: 600));
                       if (!context.mounted) return;
                       Navigator.pop(context, result);
                     },
@@ -339,6 +338,28 @@ Future<void> showBroadcastDeliveryDialog(BuildContext context, BroadcastResult r
               ),
               const SizedBox(height: 4),
               Text('In-app notifications delivered to customer apps in real time.', style: t2.bodySmall),
+              if (result.autoEmailed) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEA4335).withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.mark_email_read_rounded, color: Color(0xFFEA4335), size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Email sent automatically to ${result.emailCount} customer${result.emailCount == 1 ? '' : 's'}.',
+                          style: t2.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               if (message.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 // Quick-action buttons
@@ -356,7 +377,7 @@ Future<void> showBroadcastDeliveryDialog(BuildContext context, BroadcastResult r
                         color: const Color(0xFF25D366),
                         onTap: () => _shareViaWhatsApp(message),
                       ),
-                    if (emailList.isNotEmpty)
+                    if (!result.autoEmailed && emailList.isNotEmpty)
                       _ActionChip(
                         label: 'Email all (${emailList.length})',
                         icon: Icons.mail_rounded,

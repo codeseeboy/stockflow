@@ -133,6 +133,23 @@ class SupabaseService {
     return rows.map<CustomerBroadcast>(_broadcast).toList();
   }
 
+  /// Sends the broadcast email to all customers via the `send-broadcast-email`
+  /// Edge Function (Gmail SMTP). Returns how many were emailed. Throws on failure.
+  Future<int> sendBroadcastEmail(String subject, String body) async {
+    final res = await client.functions.invoke(
+      'send-broadcast-email',
+      body: {'subject': subject, 'body': body},
+    );
+    if (res.status != 200) {
+      throw Exception('Email function failed (status ${res.status})');
+    }
+    final data = res.data;
+    if (data is Map && data['sent'] != null) {
+      return data['sent'] is int ? data['sent'] as int : int.tryParse('${data['sent']}') ?? 0;
+    }
+    return 0;
+  }
+
   Future<void> insertBroadcast(CustomerBroadcast b) => client.from('customer_broadcasts').insert({
         'title': b.title,
         'body': b.body,
