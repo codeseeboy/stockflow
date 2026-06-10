@@ -224,8 +224,8 @@ declare
   v_take numeric;
   v_have numeric;
 begin
-  insert into orders(cycle_id, customer_name, customer_phone, status)
-  values (p_cycle, p_name, p_phone, 'pending')
+  insert into orders(cycle_id, customer_id, customer_name, customer_phone, status)
+  values (p_cycle, auth.uid(), p_name, p_phone, 'pending')
   returning id into v_order;
 
   for rec in

@@ -5,6 +5,7 @@ import '../config/supabase_config.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_prefs.dart';
+import '../utils/customer_orders.dart';
 import '../utils/item_icon_brain.dart';
 import '../utils/stock_import.dart';
 import 'supabase_service.dart';
@@ -112,14 +113,15 @@ class AppStore extends ChangeNotifier {
       } catch (_) {}
       // Always replace with real data — this clears any in-memory seed data
       // so the UI never shows demo items alongside real DB rows.
-      final localPending = orders.where((o) => o.id.startsWith('ORD-') && !fetchedOrders.any((f) => f.id == o.id)).toList();
+      // Keep in-memory orders the server didn't return (RLS gap, pending sync).
+      final localOnly = orders.where((o) => !fetchedOrders.any((f) => f.id == o.id)).toList();
       items
         ..clear()
         ..addAll(fetchedItems);
       orders
         ..clear()
         ..addAll(fetchedOrders);
-      for (final o in localPending) {
+      for (final o in localOnly) {
         orders.insert(0, o);
       }
       customerBroadcasts
@@ -312,18 +314,38 @@ class AppStore extends ChangeNotifier {
       createdAt: DateTime.now(),
     );
     orders.insert(0, order);
+    SavedCustomerOrders.upsert(customerName, customerPhone, order);
     notifyListeners();
     final sb = _sb;
     if (sb != null) {
       _fire(sb
           .placeOrder(cycleId: orderingCycle.id, name: customerName, phone: customerPhone, cart: cart)
-          .then((_) {
-        // RPC succeeded → the DB now has the real order. Drop the optimistic
-        // copy so reload() doesn't show a duplicate, then pull the truth.
-        orders.removeWhere((o) => o.id == localId);
-        return reload();
+          .then((remoteId) async {
+        final sid = remoteId.toString();
+        final idx = orders.indexWhere((o) => o.id == localId);
+        final synced = Order(
+          id: sid,
+          cycleId: order.cycleId,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+          lines: order.lines,
+          status: order.status,
+          createdAt: order.createdAt,
+        );
+        if (idx >= 0) {
+          orders[idx] = synced;
+        } else if (!orders.any((o) => o.id == sid)) {
+          orders.insert(0, synced);
+        }
+        SavedCustomerOrders.upsert(customerName, customerPhone, synced);
+        notifyListeners();
+        await reload();
+        if (!orders.any((o) => o.id == sid)) {
+          orders.insert(0, synced);
+          notifyListeners();
+        }
       }).catchError((Object _) {
-        // Remote write failed (RLS, network, etc.) — keep the local order visible.
+        // Remote write failed — local + on-device copy stays visible.
       }));
     }
     return order;

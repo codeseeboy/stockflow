@@ -118,6 +118,22 @@ class OrderLine {
     required this.unit,
     required this.qty,
   });
+
+  Map<String, dynamic> toJson() => {
+        'itemId': itemId,
+        'name': name,
+        'emoji': emoji,
+        'unit': unit,
+        'qty': qty,
+      };
+
+  factory OrderLine.fromJson(Map<String, dynamic> j) => OrderLine(
+        itemId: (j['itemId'] as String?) ?? '',
+        name: (j['name'] as String?) ?? 'Item',
+        emoji: (j['emoji'] as String?) ?? '📦',
+        unit: (j['unit'] as String?) ?? '',
+        qty: (j['qty'] as num?)?.toDouble() ?? 0,
+      );
 }
 
 class Order {
@@ -141,6 +157,28 @@ class Order {
 
   int get itemCount => lines.length;
   double get totalUnits => lines.fold(0.0, (s, l) => s + l.qty);
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'cycleId': cycleId,
+        'customerName': customerName,
+        'customerPhone': customerPhone,
+        'lines': lines.map((l) => l.toJson()).toList(),
+        'status': status.name,
+        'createdAt': createdAt.toIso8601String(),
+      };
+
+  factory Order.fromJson(Map<String, dynamic> j) => Order(
+        id: (j['id'] as String?) ?? '',
+        cycleId: (j['cycleId'] as String?) ?? '',
+        customerName: (j['customerName'] as String?) ?? '',
+        customerPhone: (j['customerPhone'] as String?) ?? '',
+        lines: ((j['lines'] as List?) ?? const [])
+            .map((e) => OrderLine.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList(),
+        status: OrderStatus.values.byName((j['status'] as String?) ?? 'pending'),
+        createdAt: DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
+      );
 }
 
 /// Admin → customer broadcast (in-app, SMS, WhatsApp).

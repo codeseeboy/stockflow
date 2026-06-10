@@ -10,6 +10,7 @@ import '../../main.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/app_prefs.dart';
+import '../../utils/customer_orders.dart';
 import '../../utils/notification_service.dart';
 import '../../widgets/ui_kit.dart';
 import '../entry_screen.dart';
@@ -290,7 +291,7 @@ class _Update {
 List<_Update> _customerUpdates(AppStore store, String name, String phone) {
   final cycle = store.activeCycle;
   final open = cycle.status == CycleStatus.open;
-  final orders = _customerOrders(store, name, phone);
+  final orders = customerOrdersFor(store, name, phone);
   final dismissed = DismissedNotifs.load();
   final out = <_Update>[];
   for (final b in store.customerBroadcasts.take(8)) {
@@ -353,23 +354,6 @@ IconData _greetIcon() {
   return Icons.nights_stay_rounded;
 }
 
-String _normPhone(String phone) => phone.replaceAll(RegExp(r'\D'), '');
-
-bool _orderBelongsToCustomer(Order o, String name, String phone) {
-  if (o.customerName.trim().toLowerCase() == name.trim().toLowerCase()) return true;
-  final np = _normPhone(phone);
-  if (np.length < 6) return false;
-  return _normPhone(o.customerPhone) == np;
-}
-
-/// All orders belonging to this customer (by name or phone), newest first.
-/// No date cutoff — orders persist in the DB and must always be visible.
-List<Order> _customerOrders(AppStore store, String name, String phone) {
-  final list = store.orders.where((o) => _orderBelongsToCustomer(o, name, phone)).toList();
-  list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-  return list;
-}
-
 /// Totals per item across this customer's orders.
 Map<String, ({String name, String emoji, String unit, double qty})> _consumptionByItem(List<Order> orders) {
   final map = <String, ({String name, String emoji, String unit, double qty})>{};
@@ -428,7 +412,7 @@ class _HomeTab extends StatelessWidget {
     final canOrder = store.canPlaceOrders;
     final displayName = _homeDisplayName(name);
     final accountSince = SavedProfile.load()?.accountCreatedAt;
-    final myOrders = _customerOrders(store, name, phone);
+    final myOrders = customerOrdersFor(store, name, phone);
     final lastOrder = myOrders.isNotEmpty ? myOrders.first : null;
 
     return SingleChildScrollView(
@@ -1132,7 +1116,7 @@ class _MyOrdersTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final t = Theme.of(context).textTheme;
-    final orders = _customerOrders(store, name, phone);
+    final orders = customerOrdersFor(store, name, phone);
 
     // Group orders by their cycle (week), newest week first.
     final byCycle = <String, List<Order>>{};
