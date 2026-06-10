@@ -22,7 +22,28 @@ class AppPrefs {
   static void setString(String key, String value) => _sp?.setString(key, value);
   static bool getBool(String key) => _sp?.getBool(key) ?? false;
   static void setBool(String key, bool value) => _sp?.setBool(key, value);
+  static List<String> getStringList(String key) => _sp?.getStringList(key) ?? const [];
+  static void setStringList(String key, List<String> value) => _sp?.setStringList(key, value);
   static void remove(String key) => _sp?.remove(key);
+}
+
+/// Notification IDs the customer has swiped away — kept so they stay dismissed
+/// across app restarts.
+class DismissedNotifs {
+  DismissedNotifs._();
+  static const _key = 'dismissed_notifs';
+
+  static Set<String> load() => AppPrefs.getStringList(_key).toSet();
+
+  static void add(String id) {
+    final set = load()..add(id);
+    // Cap so it can't grow forever.
+    final list = set.toList();
+    if (list.length > 200) list.removeRange(0, list.length - 200);
+    AppPrefs.setStringList(_key, list);
+  }
+
+  static bool contains(String id) => load().contains(id);
 }
 
 /// The locally remembered customer profile.

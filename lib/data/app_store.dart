@@ -167,8 +167,14 @@ class AppStore extends ChangeNotifier {
   /// Cycle customers place orders against — prefers an open week, otherwise the latest.
   OrderCycle get orderingCycle => activeCycle;
 
-  /// True when the customer can add items and submit an order.
-  bool get canPlaceOrders => items.isNotEmpty && orderingCycle.id.isNotEmpty;
+  /// True only when there is an OPEN order window and stock to order.
+  /// (Falls back cycle may exist but be closed — then ordering is disabled.)
+  bool get canPlaceOrders =>
+      items.isNotEmpty && orderingCycle.id.isNotEmpty && orderingCycle.status == CycleStatus.open;
+
+  /// All cycles newest-first (for week-wise order history).
+  List<OrderCycle> get cyclesByRecent =>
+      [...cycles]..sort((a, b) => b.weekStart.compareTo(a.weekStart));
 
   List<Item> get lowStockItems =>
       items.where((i) => i.status == StockStatus.low).toList();
@@ -295,8 +301,9 @@ class AppStore extends ChangeNotifier {
     if (lines.isEmpty) {
       throw StateError('Nothing could be added — check item availability and try again.');
     }
+    final localId = 'ORD-${_orderSeq++}';
     final order = Order(
-      id: 'ORD-${_orderSeq++}',
+      id: localId,
       cycleId: orderingCycle.id,
       customerName: customerName,
       customerPhone: customerPhone,
@@ -310,8 +317,12 @@ class AppStore extends ChangeNotifier {
     if (sb != null) {
       _fire(sb
           .placeOrder(cycleId: orderingCycle.id, name: customerName, phone: customerPhone, cart: cart)
-          .then((_) => reload())
-          .catchError((Object _) {
+          .then((_) {
+        // RPC succeeded → the DB now has the real order. Drop the optimistic
+        // copy so reload() doesn't show a duplicate, then pull the truth.
+        orders.removeWhere((o) => o.id == localId);
+        return reload();
+      }).catchError((Object _) {
         // Remote write failed (RLS, network, etc.) — keep the local order visible.
       }));
     }

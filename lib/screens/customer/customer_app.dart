@@ -28,14 +28,18 @@ class CustomerShell extends StatefulWidget {
   State<CustomerShell> createState() => _CustomerShellState();
 }
 
-class _CustomerShellState extends State<CustomerShell> {
+class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserver {
   int _index = 0;
   int _seenBroadcasts = 0;
+  // Only broadcasts that arrive AFTER this moment trigger a notification, so
+  // reopening the app never re-fires alerts for messages already on file.
+  final DateTime _sessionStart = DateTime.now();
 
   @override
   void initState() {
     super.initState();
     NotificationService.init();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final store = context.read<AppStore>();
@@ -46,17 +50,34 @@ class _CustomerShellState extends State<CustomerShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     context.read<AppStore>().removeListener(_onStoreUpdate);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Pull fresh data whenever the app returns to the foreground, so an admin
+    // closing the link / new orders / notifications reflect even if a realtime
+    // event was missed while backgrounded.
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<AppStore>().reload();
+    }
   }
 
   void _onStoreUpdate() {
     if (!mounted) return;
     final store = context.read<AppStore>();
-    if (store.customerBroadcasts.length <= _seenBroadcasts) return;
+    if (store.customerBroadcasts.length <= _seenBroadcasts) {
+      _seenBroadcasts = store.customerBroadcasts.length;
+      return;
+    }
     final b = store.customerBroadcasts.first;
     _seenBroadcasts = store.customerBroadcasts.length;
     if (!b.inApp) return;
+    // Skip broadcasts created before this app session (avoids re-notifying old
+    // messages that simply loaded from the server on open).
+    if (!b.sentAt.isAfter(_sessionStart)) return;
     // Status-bar notification (works even when the app is in the background).
     NotificationService.show(b.title, b.body);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -97,7 +118,7 @@ class _CustomerShellState extends State<CustomerShell> {
         bottom: false,
         child: Column(
           children: [
-            _TopBar(name: widget.name),
+            _TopBar(name: widget.name, phone: widget.phone),
             Expanded(child: IndexedStack(index: _index, children: tabs)),
           ],
         ),
@@ -118,14 +139,15 @@ class _CustomerShellState extends State<CustomerShell> {
 
 class _TopBar extends StatelessWidget {
   final String name;
-  const _TopBar({required this.name});
+  final String phone;
+  const _TopBar({required this.name, required this.phone});
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final theme = context.watch<ThemeController>();
     final store = context.watch<AppStore>();
-    final hasUpdates = _customerUpdates(store, name).isNotEmpty || store.customerBroadcasts.any((b) => b.inApp);
+    final hasUpdates = _customerUpdates(store, name, phone).isNotEmpty;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: scheme.outline))),
@@ -144,7 +166,7 @@ class _TopBar extends StatelessWidget {
           ),
           IconButton(onPressed: theme.toggle, icon: Icon(theme.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded)),
           Stack(clipBehavior: Clip.none, children: [
-            IconButton(onPressed: () => _showNotifs(context, store, name), icon: const Icon(Icons.notifications_none_rounded)),
+            IconButton(onPressed: () => _showNotifs(context, store, name, phone), icon: const Icon(Icons.notifications_none_rounded)),
             if (hasUpdates)
               Positioned(
                 right: 8,
@@ -161,55 +183,120 @@ class _TopBar extends StatelessWidget {
     );
   }
 
-  void _showNotifs(BuildContext context, AppStore store, String name) {
-    final t = Theme.of(context).textTheme;
-    final notifs = _customerUpdates(store, name);
+  void _showNotifs(BuildContext context, AppStore store, String name, String phone) {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [const Icon(Icons.notifications_active_rounded, color: AppColors.brand), const SizedBox(width: 8), Text('Notifications', style: t.titleLarge)]),
-            const SizedBox(height: 12),
-            if (notifs.isEmpty)
-              const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: EmptyState(icon: Icons.notifications_none_rounded, title: 'No notifications yet'))
-            else
-              ...notifs.map((u) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Container(width: 36, height: 36, decoration: BoxDecoration(color: u.color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(AppRadius.sm)), child: Icon(u.icon, color: u.color, size: 18)),
-                      const SizedBox(width: 12),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(u.title, style: t.titleSmall), Text(u.body, style: t.bodySmall)])),
-                    ]),
-                  )),
-            const SizedBox(height: 6),
-          ],
-        ),
-      ),
+      isScrollControlled: true,
+      builder: (_) => _NotifsSheet(store: store, name: name, phone: phone),
     );
   }
 }
 
+/// Notifications list — swipe a row left/right to dismiss it (stays dismissed).
+class _NotifsSheet extends StatefulWidget {
+  final AppStore store;
+  final String name;
+  final String phone;
+  const _NotifsSheet({required this.store, required this.name, required this.phone});
+
+  @override
+  State<_NotifsSheet> createState() => _NotifsSheetState();
+}
+
+class _NotifsSheetState extends State<_NotifsSheet> {
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final notifs = _customerUpdates(widget.store, widget.name, widget.phone);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.notifications_active_rounded, color: AppColors.brand),
+            const SizedBox(width: 8),
+            Text('Notifications', style: t.titleLarge),
+            const Spacer(),
+            if (notifs.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  for (final u in notifs) {
+                    DismissedNotifs.add(u.id);
+                  }
+                  setState(() {});
+                },
+                child: const Text('Clear all'),
+              ),
+          ]),
+          const SizedBox(height: 4),
+          if (notifs.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: EmptyState(icon: Icons.notifications_none_rounded, title: 'No notifications', subtitle: "You're all caught up."),
+            )
+          else
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final u in notifs)
+                    Dismissible(
+                      key: ValueKey(u.id),
+                      onDismissed: (_) {
+                        DismissedNotifs.add(u.id);
+                        setState(() {});
+                      },
+                      background: _swipeBg(Alignment.centerLeft),
+                      secondaryBackground: _swipeBg(Alignment.centerRight),
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Container(width: 36, height: 36, decoration: BoxDecoration(color: u.color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(AppRadius.sm)), child: Icon(u.icon, color: u.color, size: 18)),
+                          const SizedBox(width: 12),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(u.title, style: t.titleSmall), Text(u.body, style: t.bodySmall)])),
+                        ]),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 6),
+        ],
+      ),
+    );
+  }
+
+  Widget _swipeBg(Alignment alignment) => Container(
+        alignment: alignment,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(color: AppColors.danger.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(AppRadius.sm)),
+        child: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+      );
+}
+
 class _Update {
+  final String id;
   final IconData icon;
   final Color color;
   final String title;
   final String body;
-  const _Update(this.icon, this.color, this.title, this.body);
+  const _Update(this.id, this.icon, this.color, this.title, this.body);
 }
 
-List<_Update> _customerUpdates(AppStore store, String name) {
+List<_Update> _customerUpdates(AppStore store, String name, String phone) {
   final cycle = store.activeCycle;
   final open = cycle.status == CycleStatus.open;
-  final orders = store.orders.where((o) => o.customerName.trim().toLowerCase() == name.trim().toLowerCase()).toList();
+  final orders = _customerOrders(store, name, phone);
+  final dismissed = DismissedNotifs.load();
   final out = <_Update>[];
   for (final b in store.customerBroadcasts.take(8)) {
     if (!b.inApp) continue;
     out.add(_Update(
+      'bc-${b.id}',
       Icons.campaign_rounded,
       AppColors.brand,
       b.title,
@@ -217,17 +304,19 @@ List<_Update> _customerUpdates(AppStore store, String name) {
     ));
   }
   if (open) {
-    out.add(_Update(Icons.campaign_rounded, AppColors.brand, '${cycle.title} order link is open', 'Place your order before it closes.'));
+    out.add(_Update('cycle-open-${cycle.id}', Icons.campaign_rounded, AppColors.brand,
+        '${cycle.title} order link is open', 'Place your order before it closes.'));
   }
   for (final o in orders.take(5)) {
     out.add(_Update(
+      'order-${o.id}-${o.status.name}',
       o.status == OrderStatus.fulfilled ? Icons.check_circle_rounded : Icons.local_shipping_rounded,
       orderStatusColor(o.status),
       'Order ${o.id} is ${orderStatusLabel(o.status).toLowerCase()}',
       '${o.itemCount} items · ${relTime(o.createdAt)}',
     ));
   }
-  return out;
+  return out.where((u) => !dismissed.contains(u.id)).toList();
 }
 
 // ---------------- Home helpers ----------------
@@ -273,12 +362,12 @@ bool _orderBelongsToCustomer(Order o, String name, String phone) {
   return _normPhone(o.customerPhone) == np;
 }
 
-List<Order> _customerOrders(AppStore store, String name, String phone, DateTime? since) {
-  return store.orders.where((o) {
-    if (!_orderBelongsToCustomer(o, name, phone)) return false;
-    if (since != null && o.createdAt.isBefore(since)) return false;
-    return true;
-  }).toList();
+/// All orders belonging to this customer (by name or phone), newest first.
+/// No date cutoff — orders persist in the DB and must always be visible.
+List<Order> _customerOrders(AppStore store, String name, String phone) {
+  final list = store.orders.where((o) => _orderBelongsToCustomer(o, name, phone)).toList();
+  list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return list;
 }
 
 /// Totals per item across this customer's orders.
@@ -339,7 +428,7 @@ class _HomeTab extends StatelessWidget {
     final canOrder = store.canPlaceOrders;
     final displayName = _homeDisplayName(name);
     final accountSince = SavedProfile.load()?.accountCreatedAt;
-    final myOrders = _customerOrders(store, name, phone, accountSince);
+    final myOrders = _customerOrders(store, name, phone);
     final lastOrder = myOrders.isNotEmpty ? myOrders.first : null;
 
     return SingleChildScrollView(
@@ -482,7 +571,7 @@ class _OrderStatusCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                open ? 'LIVE · ${cycle.title}' : 'CLOSED',
+                open ? 'LIVE · ${cycle.title}' : '${cycle.title.isEmpty ? 'Ordering' : cycle.title} · CLOSED',
                 style: t.labelMedium?.copyWith(color: Colors.white.withValues(alpha: 0.92), letterSpacing: 1.1, fontWeight: FontWeight.w700),
               ),
             ],
@@ -494,7 +583,9 @@ class _OrderStatusCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            open ? 'Closes $closeLine, 11:59 PM' : 'Stay tuned — next window opens soon',
+            open
+                ? 'Closes $closeLine, 11:59 PM'
+                : "This week's ordering has closed. You'll be notified when the next window opens.",
             style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.88)),
           ),
           if (open) ...[
@@ -1041,8 +1132,20 @@ class _MyOrdersTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final t = Theme.of(context).textTheme;
-    final accountSince = SavedProfile.load()?.accountCreatedAt;
-    final orders = _customerOrders(store, name, phone, accountSince);
+    final orders = _customerOrders(store, name, phone);
+
+    // Group orders by their cycle (week), newest week first.
+    final byCycle = <String, List<Order>>{};
+    for (final o in orders) {
+      byCycle.putIfAbsent(o.cycleId, () => []).add(o);
+    }
+    final cycleOrder = store.cyclesByRecent.map((c) => c.id).toList();
+    final groupedIds = byCycle.keys.toList()
+      ..sort((a, b) {
+        final ia = cycleOrder.indexOf(a);
+        final ib = cycleOrder.indexOf(b);
+        return (ia == -1 ? 9999 : ia).compareTo(ib == -1 ? 9999 : ib);
+      });
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -1054,7 +1157,7 @@ class _MyOrdersTab extends StatelessWidget {
             children: [
               Text('My Orders', style: t.headlineSmall),
               const SizedBox(height: 4),
-              Text('Your orders and their status', style: t.bodyMedium),
+              Text('Your orders grouped by week, with status', style: t.bodyMedium),
               const SizedBox(height: 16),
               if (orders.isEmpty)
                 Padding(
@@ -1062,37 +1165,100 @@ class _MyOrdersTab extends StatelessWidget {
                   child: Column(children: [
                     const EmptyState(icon: Icons.receipt_long_rounded, title: 'No orders yet', subtitle: 'Place your first order to see it here.'),
                     const SizedBox(height: 12),
-                    FilledButton.icon(onPressed: onOrderNow, icon: const Icon(Icons.add_shopping_cart_rounded, size: 18), label: const Text('Start an order')),
+                    if (store.canPlaceOrders)
+                      FilledButton.icon(onPressed: onOrderNow, icon: const Icon(Icons.add_shopping_cart_rounded, size: 18), label: const Text('Start an order')),
                   ]),
                 )
               else
-                ...orders.map((o) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: AppCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(children: [
-                              Expanded(child: Text('${o.id} · ${relTime(o.createdAt)}', style: t.titleSmall)),
-                              Pill(orderStatusLabel(o.status), color: orderStatusColor(o.status)),
-                            ]),
-                            const SizedBox(height: 10),
-                            Wrap(spacing: 8, runSpacing: 8, children: [
-                              for (final l in o.lines)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(AppRadius.pill)),
-                                  child: Text('${l.emoji} ${l.name} · ${fmtQty(l.qty, l.unit)}', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                                ),
-                            ]),
-                          ],
-                        ),
-                      ),
+                ...groupedIds.map((cid) => _WeekGroup(
+                      store: store,
+                      cycleId: cid,
+                      orders: byCycle[cid]!..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
                     )),
               const SizedBox(height: 16),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// One week's worth of orders with a header showing the week + live/closed state.
+class _WeekGroup extends StatelessWidget {
+  final AppStore store;
+  final String cycleId;
+  final List<Order> orders;
+  const _WeekGroup({required this.store, required this.cycleId, required this.orders});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final cycle = store.cycles.where((c) => c.id == cycleId).firstOrNull;
+    final title = cycle?.title ?? 'Earlier orders';
+    final open = cycle?.status == CycleStatus.open;
+    final range = cycle != null
+        ? '${DateFormat('d MMM').format(cycle.weekStart)} – ${DateFormat('d MMM').format(cycle.weekEnd)}'
+        : null;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Week header
+          Row(
+            children: [
+              Icon(Icons.calendar_month_rounded, size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    if (range != null) Text(range, style: t.bodySmall),
+                  ],
+                ),
+              ),
+              Pill(open ? 'Live' : 'Closed', color: open ? AppColors.success : scheme.onSurfaceVariant),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...orders.map((o) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: AppCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(o.id, style: t.titleSmall),
+                              const SizedBox(height: 2),
+                              Text(DateFormat('EEE, d MMM · h:mm a').format(o.createdAt.toLocal()),
+                                  style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
+                        Pill(orderStatusLabel(o.status), color: orderStatusColor(o.status)),
+                      ]),
+                      const SizedBox(height: 10),
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        for (final l in o.lines)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(AppRadius.pill)),
+                            child: Text('${l.emoji} ${l.name} · ${fmtQty(l.qty, l.unit)}', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                          ),
+                      ]),
+                    ],
+                  ),
+                ),
+              )),
+        ],
       ),
     );
   }
