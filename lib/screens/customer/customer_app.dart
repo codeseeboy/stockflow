@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -32,6 +34,7 @@ class CustomerShell extends StatefulWidget {
 class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserver {
   int _index = 0;
   int _seenBroadcasts = 0;
+  Timer? _refreshTimer;
   // Only broadcasts that arrive AFTER this moment trigger a notification, so
   // reopening the app never re-fires alerts for messages already on file.
   final DateTime _sessionStart = DateTime.now();
@@ -46,11 +49,18 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       final store = context.read<AppStore>();
       _seenBroadcasts = store.customerBroadcasts.length;
       store.addListener(_onStoreUpdate);
+      // Immediate fetch + safety-net polling so the app stays in sync even if
+      // a realtime event is dropped (flaky mobile networks).
+      store.reload();
+      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (mounted) store.reload();
+      });
     });
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     context.read<AppStore>().removeListener(_onStoreUpdate);
     super.dispose();

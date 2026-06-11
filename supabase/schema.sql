@@ -138,15 +138,30 @@ create policy cycles_read on order_cycles for select using (true);
 drop policy if exists cycles_write on order_cycles;
 create policy cycles_write on order_cycles for all using (is_staff()) with check (is_staff());
 
--- Orders: staff see all; a customer sees their own. Inserts go through the RPC below.
+-- Orders: staff see all; a customer sees their own — matched by customer_id
+-- OR by their profile phone (covers older orders placed before customer_id
+-- was recorded, and guest orders re-claimed after registering).
 drop policy if exists orders_read on orders;
-create policy orders_read on orders for select using (is_staff() or customer_id = auth.uid());
+create policy orders_read on orders for select using (
+  is_staff()
+  or customer_id = auth.uid()
+  or exists (
+    select 1 from profiles p
+    where p.id = auth.uid()
+      and nullif(regexp_replace(coalesce(p.phone,''), '\D', '', 'g'), '') is not null
+      and length(regexp_replace(p.phone, '\D', '', 'g')) >= 6
+      and regexp_replace(coalesce(orders.customer_phone,''), '\D', '', 'g')
+          like '%' || right(regexp_replace(p.phone, '\D', '', 'g'), 10)
+  )
+);
 drop policy if exists orders_write on orders;
 create policy orders_write on orders for update using (is_staff()) with check (is_staff());
 
+-- Order items follow their parent order's visibility (RLS on orders applies
+-- inside the subquery, so customers only see items of orders they can read).
 drop policy if exists order_items_read on order_items;
 create policy order_items_read on order_items for select
-  using (is_staff() or exists (select 1 from orders o where o.id = order_id and o.customer_id = auth.uid()));
+  using (exists (select 1 from orders o where o.id = order_id));
 
 -- Stock movements + profiles: staff only (profiles also: read your own)
 drop policy if exists movements_staff on stock_movements;
@@ -248,6 +263,17 @@ $$;
 
 -- Let the public order link call it
 grant execute on function public.place_order(uuid, text, text, jsonb) to anon, authenticated;
+
+-- Backfill: attach old orders (placed before customer_id was recorded) to the
+-- right customer by matching phone digits. Safe to re-run.
+update orders o
+set customer_id = p.id
+from profiles p
+where o.customer_id is null
+  and nullif(regexp_replace(coalesce(p.phone,''), '\D', '', 'g'), '') is not null
+  and length(regexp_replace(p.phone, '\D', '', 'g')) >= 6
+  and regexp_replace(coalesce(o.customer_phone,''), '\D', '', 'g')
+      like '%' || right(regexp_replace(p.phone, '\D', '', 'g'), 10);
 
 -- ============================================================
 -- Realtime: broadcast item/stock changes so every open page
