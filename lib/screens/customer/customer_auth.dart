@@ -4,11 +4,28 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/app_store.dart';
+import '../../main.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/app_prefs.dart';
 import '../entry_screen.dart';
 import 'customer_app.dart';
 import 'onboarding_screen.dart';
+
+/// Web guard: customer screens may only appear at the ROOT of the website when
+/// reached via a shared order link (/c/...). If one ends up as the first route
+/// on the clean URL (stale cache, session restore), bounce to the admin side.
+/// Screens pushed on top of others (canPop) are always allowed.
+void _bounceIfWebRoot(BuildContext context) {
+  if (!kIsWeb || isCustomerOrderLink()) return;
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!context.mounted) return;
+    final route = ModalRoute.of(context);
+    if (route?.canPop ?? false) return; // intentionally navigated here
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const WebSplashScreen()),
+    );
+  });
+}
 
 /// Save the profile locally (so the session survives restarts) and enter the
 /// app — through onboarding for brand-new users, straight to the shell otherwise.
@@ -240,8 +257,19 @@ List<Widget> _staggered(List<Widget> children, {int fromMs = 150, int stepMs = 7
 
 // ---------------- Welcome ----------------
 
-class CustomerWelcome extends StatelessWidget {
+class CustomerWelcome extends StatefulWidget {
   const CustomerWelcome({super.key});
+
+  @override
+  State<CustomerWelcome> createState() => _CustomerWelcomeState();
+}
+
+class _CustomerWelcomeState extends State<CustomerWelcome> {
+  @override
+  void initState() {
+    super.initState();
+    _bounceIfWebRoot(context);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -481,6 +509,12 @@ class _CustomerLoginState extends State<CustomerLogin> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    _bounceIfWebRoot(context);
+  }
+
+  @override
   void dispose() {
     _email.dispose();
     _password.dispose();
@@ -612,6 +646,12 @@ class _CustomerRegisterState extends State<CustomerRegister> {
   bool _loading = false;
   bool _obscure = true;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _bounceIfWebRoot(context);
+  }
 
   @override
   void dispose() {

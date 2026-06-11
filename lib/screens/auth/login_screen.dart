@@ -6,6 +6,7 @@ import '../../main.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../admin/admin_shell.dart';
+import '../customer/customer_auth.dart' show CustomerWelcome;
 import '../entry_screen.dart';
 
 /// Email/password sign-in for admin & staff (only shown in live/Supabase mode).
@@ -178,9 +179,15 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 18),
                         Text(
-                          'Customers do not sign in. They use the shared order link.',
+                          'Customers order via the shared weekly link.',
                           textAlign: TextAlign.center,
                           style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const CustomerWelcome()),
+                          ),
+                          child: const Text("I'm a customer — open the order page"),
                         ),
                       ],
                     ),

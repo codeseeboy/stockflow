@@ -35,7 +35,7 @@ class ThemeController extends ChangeNotifier {
 
 /// True when the website was opened via a shared order link (e.g. /c/abc123),
 /// meaning a customer — not staff — landed here and should see the order flow.
-bool _isCustomerOrderLink() {
+bool isCustomerOrderLink() {
   final seg = Uri.base.pathSegments;
   return seg.isNotEmpty && seg.first == 'c';
 }
@@ -69,7 +69,7 @@ class StockFlowApp extends StatelessWidget {
           // Website root = admin console. A shared order link (/c/<token>) on the
           // web opens the customer ordering flow instead. The app = customer.
           home: kIsWeb
-              ? (_isCustomerOrderLink() ? const CustomerWelcome() : const WebSplashScreen())
+              ? (isCustomerOrderLink() ? const CustomerWelcome() : const WebSplashScreen())
               : const SplashScreen(),
         ),
       ),
