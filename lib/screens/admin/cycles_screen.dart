@@ -187,6 +187,12 @@ class _ActiveCard extends StatelessWidget {
                 label: const Text('Notify customers'),
               ),
               OutlinedButton.icon(
+                onPressed: () => _prepareWhatsAppText(context),
+                style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF25D366)),
+                icon: const Icon(Icons.chat_rounded, size: 18),
+                label: const Text('Prepare WhatsApp text'),
+              ),
+              OutlinedButton.icon(
                 onPressed: () {
                   store.closeCycle(cycle);
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order window closed')));
@@ -224,6 +230,80 @@ class _ActiveCard extends StatelessWidget {
         subject: 'StockFlow — ${cycle.title} order window is open',
       );
     }
+  }
+
+  /// Builds the standard home-delivery WhatsApp announcement with this week's
+  /// live order link and dates filled in, ready to copy and forward.
+  void _prepareWhatsAppText(BuildContext context) {
+    final d = DateFormat('d MMM yy');
+    final delivery = cycle.weekEnd.add(const Duration(days: 1));
+    final message = '''Greetings of the day !!
+
+*RIK 2nd Fresh Home delivery (Dharamvir and Tarangini Apartment) for the month of ${DateFormat('MMM yy').format(delivery)}* is scheduled on *${d.format(delivery)}*. All home delivery subscribed personnel are requested to select their preferred varieties by filling the below mentioned order form latest by *1800 hrs* on *${d.format(cycle.weekEnd)}*. Request timely participation by all concerned.
+
+_*Onion and Potato will be delivered as per normal entitlement. This order form aims at providing better variety to all home delivery subscribed personnel.*_
+
+${cycle.link}
+
+*Note:-* All items are subject to availability in local market and might change in case of unforeseen circumstances.
+
+Regards
+Team BVY(Koc)''';
+
+    final controller = TextEditingController(text: message);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.chat_rounded, color: Color(0xFF25D366)),
+            SizedBox(width: 8),
+            Text('WhatsApp message'),
+          ],
+        ),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This week\'s link is filled in. Edit if needed, then copy and paste into your WhatsApp group.',
+                style: Theme.of(ctx).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 340),
+                child: TextField(
+                  controller: controller,
+                  maxLines: null,
+                  style: const TextStyle(fontSize: 13, height: 1.45),
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.all(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: controller.text));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Message copied — paste it in WhatsApp')),
+              );
+            },
+            icon: const Icon(Icons.copy_rounded, size: 18),
+            label: const Text('Copy message'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
