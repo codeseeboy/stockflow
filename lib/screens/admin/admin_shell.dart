@@ -384,24 +384,31 @@ class _TopBar extends StatelessWidget {
         color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outline)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: wide ? 18 : 12, vertical: 12),
       child: Row(
         children: [
           if (!wide) ...[
             const BrandMark(size: 32),
             const SizedBox(width: 10),
           ],
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: t.titleLarge),
-              if (subtitle != null)
-                Text(subtitle!, style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
-            ],
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: t.titleLarge, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      if (subtitle != null)
+                        Text(subtitle!, style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (role == UserRole.worker) const Pill('Staff', color: AppColors.cDairy),
+              ],
+            ),
           ),
-          const SizedBox(width: 10),
-          if (role == UserRole.worker) const Pill('Staff', color: AppColors.cDairy),
-          const Spacer(),
           IconButton(
             tooltip: 'Theme',
             onPressed: theme.toggle,

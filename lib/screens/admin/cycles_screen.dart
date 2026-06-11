@@ -119,33 +119,41 @@ class _ActiveCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(color: AppColors.brandWash, borderRadius: BorderRadius.circular(AppRadius.md)),
-                child: const Icon(Icons.link_rounded, color: AppColors.brand),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(cycle.title, style: t.titleLarge),
-                        const SizedBox(width: 8),
-                        const _LiveDot(),
-                      ],
-                    ),
-                    Text(range, style: t.bodyMedium),
-                  ],
+          LayoutBuilder(builder: (context, c) {
+            final narrow = c.maxWidth < 430;
+            return Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(color: AppColors.brandWash, borderRadius: BorderRadius.circular(AppRadius.md)),
+                  child: const Icon(Icons.link_rounded, color: AppColors.brand),
                 ),
-              ),
-              Pill('$orderCount orders', color: AppColors.cDairy, icon: Icons.receipt_long_rounded),
-            ],
-          ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(child: Text(cycle.title, style: t.titleLarge, overflow: TextOverflow.ellipsis)),
+                          const SizedBox(width: 8),
+                          const _LiveDot(),
+                        ],
+                      ),
+                      Text(range, style: t.bodyMedium, maxLines: 2),
+                      if (narrow) ...[
+                        const SizedBox(height: 6),
+                        Pill('$orderCount orders', color: AppColors.cDairy, icon: Icons.receipt_long_rounded),
+                      ],
+                    ],
+                  ),
+                ),
+                if (!narrow)
+                  Pill('$orderCount orders', color: AppColors.cDairy, icon: Icons.receipt_long_rounded),
+              ],
+            );
+          }),
           const SizedBox(height: 18),
           Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),

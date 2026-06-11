@@ -197,7 +197,7 @@ class _Legend extends StatelessWidget {
           Text(label, style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
         ]);
     if (single) return dot(AppColors.cDairy, 'Units ordered');
-    return Row(children: [dot(_soldColor, 'Sold this cycle'), const SizedBox(width: 18), dot(_stockColor, 'Current stock')]);
+    return Wrap(spacing: 18, runSpacing: 8, children: [dot(_soldColor, 'Sold this cycle'), dot(_stockColor, 'Current stock')]);
   }
 }
 

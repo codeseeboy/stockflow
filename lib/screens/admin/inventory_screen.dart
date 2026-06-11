@@ -183,8 +183,9 @@ class _Toolbar extends StatelessWidget {
           prefixIcon: Icon(Icons.search_rounded),
         ),
       );
-      final actions = Row(
-        mainAxisSize: MainAxisSize.min,
+      final actions = Wrap(
+        spacing: 10,
+        runSpacing: 10,
         children: [
           FilterChip(
             selected: onlyLow,
@@ -193,13 +194,11 @@ class _Toolbar extends StatelessWidget {
             label: const Text('Low & out'),
             selectedColor: AppColors.warningWash,
           ),
-          const SizedBox(width: 10),
           OutlinedButton.icon(
             onPressed: onImport,
             icon: const Icon(Icons.upload_file_rounded, size: 18),
             label: const Text('Import'),
           ),
-          const SizedBox(width: 10),
           FilledButton.icon(
             onPressed: onAdd,
             icon: const Icon(Icons.add_rounded, size: 18),

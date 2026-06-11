@@ -132,15 +132,25 @@ class _OrderCard extends StatelessWidget {
           const SizedBox(height: 14),
           const Divider(),
           const SizedBox(height: 6),
-          Row(
-            children: [
-              Icon(Icons.phone_rounded, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 6),
-              Text(order.customerPhone, style: t.bodySmall),
-              const Spacer(),
-              ..._actions(context),
-            ],
-          ),
+          LayoutBuilder(builder: (context, c) {
+            final phone = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.phone_rounded, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Flexible(child: Text(order.customerPhone, style: t.bodySmall, overflow: TextOverflow.ellipsis)),
+              ],
+            );
+            final actions = Row(mainAxisSize: MainAxisSize.min, children: _actions(context));
+            // Stack phone above actions when the card is too narrow for both.
+            if (c.maxWidth < 380) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [phone, const SizedBox(height: 8), Align(alignment: Alignment.centerRight, child: actions)],
+              );
+            }
+            return Row(children: [Expanded(child: phone), actions]);
+          }),
         ],
       ),
     );
