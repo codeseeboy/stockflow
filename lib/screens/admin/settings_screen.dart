@@ -131,11 +131,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _aboutRow('Version', '1.0.0'),
-                      const SizedBox(height: 10),
-                      _aboutRow('Backend', context.watch<AppStore>().isLive ? 'Supabase (live)' : 'In-memory demo'),
-                      const SizedBox(height: 10),
-                      _aboutRow('Built with', 'Flutter · app + web'),
+                      _aboutRow('Version', '1.1.0'),
+                      const Divider(height: 24),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: AppColors.brandWash,
+                              borderRadius: BorderRadius.circular(AppRadius.sm),
+                            ),
+                            child: const Icon(Icons.school_rounded, color: AppColors.brand, size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Built by', style: Theme.of(context).textTheme.bodySmall),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'St. John College of Engineering and Management (SJCEM)',
+                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(height: 1.35),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
