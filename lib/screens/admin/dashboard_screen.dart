@@ -1,4 +1,3 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -39,8 +38,6 @@ class DashboardScreen extends StatelessWidget {
                 final wide = c.maxWidth > 860;
                 final left = Column(
                   children: [
-                    _CategoryCard(store: store),
-                    const SizedBox(height: 16),
                     _RecentOrders(store: store),
                   ],
                 );
@@ -332,76 +329,6 @@ class _AttentionRow extends StatelessWidget {
             },
             child: const Text('Restock'),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CategoryCard extends StatelessWidget {
-  final AppStore store;
-  const _CategoryCard({required this.store});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final data = store.unitsByCategory;
-    final entries = data.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-    final total = entries.fold<double>(0, (s, e) => s + e.value);
-
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionHeader(title: 'Stock by category', subtitle: 'Units remaining across the store'),
-          const SizedBox(height: 16),
-          LayoutBuilder(builder: (context, c) {
-            final wide = c.maxWidth > 460;
-            final chart = SizedBox(
-              height: 170,
-              width: 170,
-              child: PieChart(
-                PieChartData(
-                  sectionsSpace: 2,
-                  centerSpaceRadius: 48,
-                  sections: [
-                    for (var i = 0; i < entries.length; i++)
-                      PieChartSectionData(
-                        value: entries[i].value,
-                        color: categoryOf(entries[i].key).color,
-                        radius: 26,
-                        showTitle: false,
-                      ),
-                  ],
-                ),
-              ),
-            );
-            final legend = Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final e in entries)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 9),
-                    child: Row(
-                      children: [
-                        Container(width: 11, height: 11, decoration: BoxDecoration(color: categoryOf(e.key).color, borderRadius: BorderRadius.circular(3))),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(e.key, style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
-                        Text('${total == 0 ? 0 : (e.value / total * 100).round()}%', style: t.bodySmall),
-                      ],
-                    ),
-                  ),
-              ],
-            );
-            if (!wide) {
-              return Column(children: [Center(child: chart), const SizedBox(height: 16), legend]);
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [chart, const SizedBox(width: 24), Expanded(child: legend)],
-            );
-          }),
         ],
       ),
     );
