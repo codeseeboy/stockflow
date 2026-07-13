@@ -56,6 +56,7 @@ class SavedProfile {
   final String phone;
   final String email;
   final String address;
+  final String designation;
   final bool guest;
   final DateTime? accountCreatedAt;
 
@@ -64,6 +65,7 @@ class SavedProfile {
     this.phone = '',
     this.email = '',
     this.address = '',
+    this.designation = '',
     this.guest = false,
     this.accountCreatedAt,
   });
@@ -79,6 +81,7 @@ class SavedProfile {
       'phone': phone,
       'email': email,
       'address': address,
+      'designation': designation,
       'guest': guest,
     };
     if (created != null) data['accountCreatedAt'] = created.toIso8601String();
@@ -98,6 +101,7 @@ class SavedProfile {
         phone: (m['phone'] as String?) ?? '',
         email: (m['email'] as String?) ?? '',
         address: (m['address'] as String?) ?? '',
+        designation: (m['designation'] as String?) ?? '',
         guest: (m['guest'] as bool?) ?? false,
         accountCreatedAt: createdRaw != null ? DateTime.tryParse(createdRaw) : null,
       );

@@ -165,7 +165,7 @@ class _SplashScreenState extends State<SplashScreen> {
     final hasSession = store.isSignedIn || !SupabaseConfig.isConfigured;
     Widget next;
     if (profile != null && (profile.guest || hasSession)) {
-      next = CustomerShell(name: profile.name, phone: profile.phone, email: profile.email, address: profile.address);
+      next = CustomerShell(name: profile.name, phone: profile.phone, email: profile.email, address: profile.address, designation: profile.designation);
     } else {
       if (profile != null) SavedProfile.clear(); // stale account profile without a session
       next = const CustomerRegister();
