@@ -97,7 +97,7 @@ class _OrderCard extends StatelessWidget {
               CircleAvatar(
                 radius: 22,
                 backgroundColor: AppColors.brandWash,
-                child: Text(order.customerName.substring(0, 1), style: const TextStyle(color: AppColors.brandDark, fontWeight: FontWeight.w800)),
+                child: Text(order.customerName.isEmpty ? '?' : order.customerName[0].toUpperCase(), style: const TextStyle(color: AppColors.brandDark, fontWeight: FontWeight.w800)),
               ),
               const SizedBox(width: 12),
               Expanded(
