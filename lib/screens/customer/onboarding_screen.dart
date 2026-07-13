@@ -15,6 +15,7 @@ class OnboardingScreen extends StatefulWidget {
   final String phone;
   final String email;
   final String address;
+  final String designation;
 
   const OnboardingScreen({
     super.key,
@@ -22,6 +23,7 @@ class OnboardingScreen extends StatefulWidget {
     this.phone = '',
     this.email = '',
     this.address = '',
+    this.designation = '',
   });
 
   @override
@@ -58,6 +60,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           phone: widget.phone,
           email: widget.email,
           address: widget.address,
+          designation: widget.designation,
         ),
         transitionsBuilder: (_, anim, _, child) => FadeTransition(
           opacity: CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
