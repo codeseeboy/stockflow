@@ -9,7 +9,6 @@ import '../../theme/app_theme.dart';
 import '../../widgets/ui_kit.dart';
 import '../auth/login_screen.dart';
 import '../entry_screen.dart';
-import 'analytics_screen.dart';
 import 'cycles_screen.dart';
 import 'dashboard_screen.dart';
 import 'inventory_screen.dart';
@@ -17,6 +16,7 @@ import 'orders_screen.dart';
 import 'reports_screen.dart';
 import 'settings_screen.dart';
 import 'users_screen.dart';
+import 'zones_screen.dart';
 
 void _push(BuildContext context, Widget page) =>
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
@@ -48,16 +48,16 @@ class _AdminShellState extends State<AdminShell> {
 
   bool get _isAdmin => widget.role == UserRole.admin;
 
-  // Full admin lives on the website. The app keeps a lean set; analytics,
-  // weekly-link management, reports and users are web-only.
+  // Zones are the heart of the console; admins manage zones + links on app and
+  // web. Reports and users remain web-only.
   late final List<_Dest> _dests = [
     const _Dest(Icons.dashboard_outlined, Icons.dashboard_rounded, 'Dashboard', DashboardScreen()),
-    if (kIsWeb)
-      const _Dest(Icons.insights_outlined, Icons.insights_rounded, 'Analytics', AnalyticsScreen()),
+    if (_isAdmin)
+      const _Dest(Icons.shield_moon_outlined, Icons.shield_moon_rounded, 'Zones', ZonesScreen()),
     const _Dest(Icons.inventory_2_outlined, Icons.inventory_2_rounded, 'Inventory', InventoryScreen()),
     const _Dest(Icons.receipt_long_outlined, Icons.receipt_long_rounded, 'Orders', OrdersScreen()),
-    if (kIsWeb && _isAdmin)
-      const _Dest(Icons.link_rounded, Icons.link_rounded, 'Weekly Link', CyclesScreen()),
+    if (_isAdmin)
+      const _Dest(Icons.link_rounded, Icons.link_rounded, 'Links', CyclesScreen()),
   ];
 
   @override
@@ -314,7 +314,7 @@ class _AppLimitedBanner extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'App view. Analytics, reports, users and weekly link are on the website.',
+              'App view. Detailed reports and user management are on the website.',
               style: t.bodySmall?.copyWith(color: const Color(0xFF8A5A12), fontWeight: FontWeight.w600),
             ),
           ),
