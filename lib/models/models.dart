@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
+import '../data/rik_entitlement.dart';
 import '../theme/app_theme.dart';
+
+export '../data/rik_entitlement.dart';
 
 enum UserRole { admin, worker, customer }
 
@@ -18,18 +21,117 @@ class Category {
   const Category(this.name, this.icon, this.color);
 }
 
-const kCategories = <Category>[
-  Category('Grains', Icons.grain_rounded, AppColors.cGrains),
-  Category('Pulses', Icons.spa_rounded, AppColors.cPulses),
-  Category('Vegetables', Icons.eco_rounded, AppColors.cVeg),
-  Category('Fruits', Icons.apple_rounded, AppColors.cFruits),
-  Category('Dairy', Icons.egg_alt_rounded, AppColors.cDairy),
-  Category('Bakery', Icons.bakery_dining_rounded, AppColors.cBakery),
-  Category('Essentials', Icons.local_grocery_store_rounded, AppColors.cEssentials),
+const _catPalette = <Color>[
+  AppColors.cGrains, AppColors.cPulses, AppColors.cVeg, AppColors.cFruits,
+  AppColors.cDairy, AppColors.cBakery, AppColors.cEssentials, AppColors.brand,
+  AppColors.accent, AppColors.warning,
+];
+
+IconData _rikIcon(String name) {
+  switch (name) {
+    case 'Cereals':
+      return Icons.grain_rounded;
+    case 'Dal':
+      return Icons.spa_rounded;
+    case 'Refined Oil':
+      return Icons.water_drop_rounded;
+    case 'Sugar':
+      return Icons.cookie_rounded;
+    case 'Milk':
+      return Icons.local_drink_rounded;
+    case 'Meat':
+      return Icons.set_meal_rounded;
+    case 'Vegetables':
+      return Icons.eco_rounded;
+    case 'Potato':
+    case 'Onion':
+      return Icons.spa_outlined;
+    case 'Eggs':
+      return Icons.egg_rounded;
+    case 'Tea/Coffee':
+      return Icons.coffee_rounded;
+    case 'Fruit':
+      return Icons.apple_rounded;
+    case 'Dalia':
+      return Icons.rice_bowl_rounded;
+    case 'Butter':
+      return Icons.breakfast_dining_rounded;
+    case 'Condiments':
+      return Icons.local_fire_department_rounded;
+    case 'Salt':
+      return Icons.grain_outlined;
+    case 'LPG':
+      return Icons.propane_tank_rounded;
+    default:
+      return Icons.restaurant_rounded;
+  }
+}
+
+/// Categories are the 17 real RIK entitlement categories (from [kRikOfficers]).
+final List<Category> kCategories = [
+  for (var i = 0; i < kRikOfficers.length; i++)
+    Category(kRikOfficers[i].name, _rikIcon(kRikOfficers[i].name), _catPalette[i % _catPalette.length]),
 ];
 
 Category categoryOf(String name) =>
     kCategories.firstWhere((c) => c.name == name, orElse: () => kCategories.last);
+
+/// A ration entitlement tier ("zone"). Models the Indian-Navy ration system:
+/// each zone has its own criteria — a master ration cap, a cap per food
+/// category, and optional per-item maximums. The customer never sees stock;
+/// these limits (not availability) govern how much they may order.
+class RationZone {
+  final String name; // 'High Level' / 'Medium Level' / 'Low Level'
+  final String level; // short badge label
+  final double masterLimit; // total ration points across all categories
+  final Map<String, double> categoryLimits; // per-category cap
+  final Map<String, double> itemMax; // optional per-item cap, by item name
+  final double defaultCategoryLimit;
+
+  const RationZone({
+    required this.name,
+    required this.level,
+    required this.masterLimit,
+    this.categoryLimits = const {},
+    this.itemMax = const {},
+    this.defaultCategoryLimit = 8,
+  });
+
+  double categoryLimit(String category) => categoryLimits[category] ?? defaultCategoryLimit;
+  double maxForItem(String itemName) => itemMax[itemName] ?? double.infinity;
+}
+
+double _rikCap(double perDay) => double.parse((perDay * kRationPeriodDays).toStringAsFixed(3));
+
+final Map<String, double> _officersCategoryLimits = {
+  for (final c in kRikOfficers) c.name: _rikCap(c.perDay),
+};
+
+/// The Officers ration scale, derived from the real RIK per-day entitlement
+/// × the ordering period (a week). Category caps and the master total come
+/// straight from the sheet; admins can still tune them per zone in the store.
+final RationZone _officersZone = RationZone(
+  name: 'Officers',
+  level: 'Officers',
+  masterLimit: _officersCategoryLimits.values.fold(0.0, (s, v) => s + v),
+  categoryLimits: _officersCategoryLimits,
+  itemMax: const {},
+);
+
+/// Ration scales by personnel category. Currently only the real Officers sheet
+/// is loaded; more (Sailors, etc.) can be added as their scales arrive.
+final List<RationZone> kRationZones = [_officersZone];
+
+final List<String> kZoneNames = [for (final z in kRationZones) z.name];
+
+/// Resolve a scale by name (case-insensitive); falls back to the first (Officers).
+RationZone rationZoneFor(String name) {
+  final n = name.trim().toLowerCase();
+  return kRationZones.firstWhere(
+    (z) => z.name.toLowerCase() == n,
+    orElse: () => kRationZones.first,
+  );
+}
 
 /// A stock item (also carries its own live quantity for this prototype).
 class Item {
@@ -75,6 +177,7 @@ class AppUser {
   final String phone;
   final String unit;
   final String email;
+  final String zone; // ration zone for customers ('' for staff/admin)
   const AppUser({
     required this.id,
     required this.name,
@@ -82,6 +185,7 @@ class AppUser {
     required this.phone,
     required this.unit,
     this.email = '',
+    this.zone = '',
   });
 }
 
@@ -93,6 +197,11 @@ class OrderCycle {
   CycleStatus status;
   final String shareToken;
 
+  /// Free-text audience for this link. Empty = open to everyone; otherwise only
+  /// customers whose designation matches (e.g. 'Officers', 'Sailors Mess A')
+  /// can see and use this window.
+  final String designation;
+
   OrderCycle({
     required this.id,
     required this.title,
@@ -100,7 +209,11 @@ class OrderCycle {
     required this.weekEnd,
     required this.status,
     required this.shareToken,
+    this.designation = '',
   });
+
+  /// True when this window is open to everyone (no designation restriction).
+  bool get isPublic => designation.trim().isEmpty;
 
   String get link => '${SupabaseConfig.publicWebBase}/c/$shareToken';
 }
