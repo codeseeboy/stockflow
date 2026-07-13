@@ -6,15 +6,37 @@ import 'package:provider/provider.dart';
 import '../../data/app_store.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/customer_orders.dart';
 import '../../widgets/ui_kit.dart';
 
-double _stepFor(String unit) => (unit == 'kg' || unit == 'litre') ? 5 : 1;
+/// A friendly add/remove increment sized to the entitlement [cap] so ~6–8 taps
+/// fill any category, whether it's 0.06 kg of tea or 14 eggs.
+double _stepFor(double cap, String unit) {
+  if (unit == 'nos' || unit == 'dozen' || unit == 'piece' || unit == 'packet') {
+    if (cap >= 24) return 6;
+    if (cap >= 10) return 2;
+    return 1;
+  }
+  const nice = <double>[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50];
+  final target = cap / 8;
+  var best = nice.first;
+  var bestDiff = (nice.first - target).abs();
+  for (final s in nice) {
+    final d = (s - target).abs();
+    if (d < bestDiff) {
+      best = s;
+      bestDiff = d;
+    }
+  }
+  return best;
+}
 
 /// Weekly order form: pick items + quantities, review a summary, then confirm.
 class OrderForm extends StatefulWidget {
   final String name;
   final String phone;
-  const OrderForm({super.key, required this.name, required this.phone});
+  final String designation;
+  const OrderForm({super.key, required this.name, required this.phone, this.designation = ''});
 
   @override
   State<OrderForm> createState() => _OrderFormState();
@@ -24,17 +46,84 @@ class _OrderFormState extends State<OrderForm> {
   final Map<String, double> _picked = {};
   String _query = '';
   String _category = 'All';
+  String? _selectedCycleId;
+  AppStore? _storeRef;
 
   int get _count => _picked.values.where((v) => v > 0).length;
   double get _units => _picked.values.fold(0.0, (s, v) => s + v);
 
+  /// The customer's ration zone (entitlement criteria), set each build.
+  RationZone _zone = kRationZones.first;
+
+  /// Quantity already picked across all items in [cat].
+  double _pickedInCategory(String cat) {
+    final store = _storeRef;
+    if (store == null) return 0;
+    var sum = 0.0;
+    _picked.forEach((id, q) {
+      final it = store.items.where((i) => i.id == id);
+      if (it.isNotEmpty && it.first.category == cat) sum += q;
+    });
+    return sum;
+  }
+
+  /// Total ration points used so far (sum of all picked quantities).
+  double get _masterUsed => _picked.values.fold(0.0, (s, v) => s + v);
+
+  /// The most this item may still reach, bounded by the master ration cap, the
+  /// item's category cap, and any per-item maximum for the zone.
+  double _capForItem(Item item) {
+    final picked = _picked[item.id] ?? 0;
+    final masterHead = _zone.masterLimit - _masterUsed + picked;
+    final catHead = _zone.categoryLimit(item.category) - _pickedInCategory(item.category) + picked;
+    final itemMax = _zone.maxForItem(item.name);
+    var cap = masterHead;
+    if (catHead < cap) cap = catHead;
+    if (itemMax < cap) cap = itemMax;
+    return cap < 0 ? 0 : cap;
+  }
+
+  /// Per-item max label (e.g. "Max 8 kg"), or '' when uncapped.
+  String _maxLabelFor(Item item) {
+    final m = _zone.maxForItem(item.name);
+    return m.isFinite ? 'Max ${fmtNum(m)} ${item.unit}' : '';
+  }
+
+  /// Add/remove increment for an item, sized to its category entitlement.
+  double _stepForItem(Item item) => _stepFor(_zone.categoryLimit(item.category), item.unit);
+
+  bool _isInLieu(Item item) => isInLieuArticle(item.name);
+
   void _setQty(Item item, double qty) {
     setState(() {
-      final clamped = qty.clamp(0, item.currentQty).toDouble();
-      if (clamped <= 0) {
+      var next = qty < 0 ? 0.0 : qty;
+      final picked = _picked[item.id] ?? 0;
+      final masterHead = _zone.masterLimit - _masterUsed + picked;
+      final catHead = _zone.categoryLimit(item.category) - _pickedInCategory(item.category) + picked;
+      final itemMax = _zone.maxForItem(item.name);
+      var cap = masterHead;
+      if (catHead < cap) cap = catHead;
+      if (itemMax < cap) cap = itemMax;
+      if (cap < 0) cap = 0;
+
+      if (next > cap) {
+        next = cap;
+        final String msg;
+        if (cap == itemMax) {
+          msg = 'Max ${fmtNum(itemMax)} ${item.unit} of ${item.name} for your zone';
+        } else if (cap == catHead) {
+          msg = '${item.category} ration limit reached';
+        } else {
+          msg = 'Master ration limit reached';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(duration: const Duration(seconds: 2), content: Text(msg)),
+        );
+      }
+      if (next <= 0) {
         _picked.remove(item.id);
       } else {
-        _picked[item.id] = clamped;
+        _picked[item.id] = next;
       }
     });
   }
@@ -42,15 +131,33 @@ class _OrderFormState extends State<OrderForm> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final cycle = store.orderingCycle;
-    final canOrder = store.canPlaceOrders;
+    _storeRef = store;
+    _zone = store.zoneFor(widget.designation);
 
-    _picked.removeWhere((id, qty) {
-      final it = store.items.where((i) => i.id == id);
-      return it.isEmpty || it.first.currentQty <= 0;
-    });
+    // Drop only items that no longer exist — stock never removes an item.
+    _picked.removeWhere((id, qty) => !store.items.any((i) => i.id == id));
 
-    if (!canOrder) return const _NoOrderState();
+    // Open ration links this customer (by zone) may order in.
+    final windows = store.openCyclesFor(widget.designation);
+    if (windows.isEmpty || store.items.isEmpty) return const _NoOrderState();
+
+    final orderedIds = customerOrdersFor(store, widget.name, widget.phone)
+        .map((o) => o.cycleId)
+        .toSet();
+
+    // Selected window: the chosen one if still open, else the first not-yet-
+    // ordered window, else the first.
+    final cycle = windows.firstWhere(
+      (c) => c.id == _selectedCycleId,
+      orElse: () => windows.firstWhere(
+        (c) => !orderedIds.contains(c.id),
+        orElse: () => windows.first,
+      ),
+    );
+    final alreadyOrdered = orderedIds.contains(cycle.id);
+
+    // Single window already used → full-screen "closed for you" state.
+    if (windows.length == 1 && alreadyOrdered) return _AlreadyOrderedState(cycle: cycle);
 
     final matches = store.items.where((i) {
       final mq = _query.isEmpty || i.name.toLowerCase().contains(_query.toLowerCase());
@@ -70,29 +177,54 @@ class _OrderFormState extends State<OrderForm> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _DateBanner(cycle: cycle),
-                    const SizedBox(height: 14),
-                    TextField(
-                      onChanged: (v) => setState(() => _query = v),
-                      decoration: const InputDecoration(hintText: 'Search items…', prefixIcon: Icon(Icons.search_rounded)),
-                    ),
-                    const SizedBox(height: 12),
-                    _Categories(selected: _category, onSelect: (c) => setState(() => _category = c)),
-                    const SizedBox(height: 16),
-                    if (matches.isEmpty)
-                      const Padding(padding: EdgeInsets.only(top: 36), child: EmptyState(icon: Icons.search_off_rounded, title: 'Nothing matches'))
-                    else if (grouped)
-                      ..._sections(store, matches)
-                    else
-                      _grid(matches),
-                    const SizedBox(height: 8),
+                    if (windows.length > 1) ...[
+                      _WindowSelector(
+                        windows: windows,
+                        selectedId: cycle.id,
+                        orderedIds: orderedIds,
+                        onSelect: (id) => setState(() => _selectedCycleId = id),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    if (alreadyOrdered)
+                      _AlreadyOrderedInline(cycle: cycle)
+                    else ...[
+                      _MasterRationBar(used: _masterUsed, limit: _zone.masterLimit, level: _zone.level),
+                      const SizedBox(height: 12),
+                      _DateBanner(cycle: cycle),
+                      const SizedBox(height: 14),
+                      TextField(
+                        onChanged: (v) => setState(() => _query = v),
+                        decoration: const InputDecoration(hintText: 'Search items…', prefixIcon: Icon(Icons.search_rounded)),
+                      ),
+                      const SizedBox(height: 12),
+                      _Categories(selected: _category, onSelect: (c) => setState(() => _category = c)),
+                      const SizedBox(height: 16),
+                      if (matches.isEmpty)
+                        const Padding(padding: EdgeInsets.only(top: 36), child: EmptyState(icon: Icons.search_off_rounded, title: 'Nothing matches'))
+                      else if (grouped)
+                        ..._sections(store, matches)
+                      else ...[
+                        if (_category != 'All')
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _CategoryQuotaBar(
+                              category: categoryOf(_category),
+                              picked: _pickedInCategory(_category),
+                              quota: _zone.categoryLimit(_category),
+                            ),
+                          ),
+                        _grid(matches),
+                      ],
+                      const SizedBox(height: 8),
+                    ],
                   ],
                 ),
               ),
             ),
           ),
         ),
-        if (_count > 0) _SubmitBar(count: _count, units: _units, onReview: () => _openReview(store)),
+        if (!alreadyOrdered && _count > 0) _SubmitBar(count: _count, units: _units, onReview: () => _openReview(store, cycle)),
       ],
     );
   }
@@ -103,13 +235,19 @@ class _OrderFormState extends State<OrderForm> {
       final inCat = items.where((i) => i.category == cat.name).toList();
       if (inCat.isEmpty) continue;
       out.add(Padding(
-        padding: const EdgeInsets.only(bottom: 10, top: 2),
+        padding: const EdgeInsets.only(bottom: 8, top: 2),
         child: Row(children: [
           Icon(cat.icon, size: 16, color: cat.color),
           const SizedBox(width: 7),
           Text(cat.name, style: Theme.of(context).textTheme.titleMedium),
         ]),
       ));
+      out.add(_CategoryQuotaBar(
+        category: cat,
+        picked: _pickedInCategory(cat.name),
+        quota: _zone.categoryLimit(cat.name),
+      ));
+      out.add(const SizedBox(height: 10));
       out.add(_grid(inCat));
       out.add(const SizedBox(height: 18));
     }
@@ -125,13 +263,24 @@ class _OrderFormState extends State<OrderForm> {
         runSpacing: 12,
         children: [
           for (final item in items)
-            SizedBox(width: w, child: _ProductTile(item: item, qty: _picked[item.id] ?? 0, onChanged: (q) => _setQty(item, q))),
+            SizedBox(
+              width: w,
+              child: _ProductTile(
+                item: item,
+                qty: _picked[item.id] ?? 0,
+                maxQty: _capForItem(item),
+                maxLabel: _maxLabelFor(item),
+                step: _stepForItem(item),
+                inLieu: _isInLieu(item),
+                onChanged: (q) => _setQty(item, q),
+              ),
+            ),
         ],
       );
     });
   }
 
-  void _openReview(AppStore store) {
+  void _openReview(AppStore store, OrderCycle cycle) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -140,15 +289,17 @@ class _OrderFormState extends State<OrderForm> {
         picked: _picked,
         store: store,
         name: widget.name,
+        capFor: _capForItem,
+        stepFor: _stepForItem,
         onChange: (item, q) => _setQty(item, q),
-        onConfirm: () => _placeOrder(store),
+        onConfirm: () => _placeOrder(store, cycle),
       ),
     );
   }
 
-  void _placeOrder(AppStore store) {
+  void _placeOrder(AppStore store, OrderCycle cycle) {
     try {
-      final order = store.placeOrder(customerName: widget.name, customerPhone: widget.phone, cart: Map.of(_picked));
+      final order = store.placeOrder(customerName: widget.name, customerPhone: widget.phone, cart: Map.of(_picked), cycleId: cycle.id);
       setState(() => _picked.clear());
       Navigator.pop(context); // review sheet
       showDialog(context: context, builder: (_) => _SuccessDialog(orderId: order.id, items: order.itemCount));
@@ -176,6 +327,232 @@ class _NoOrderState extends StatelessWidget {
           Text("You'll be notified the moment this week's order link goes live.", textAlign: TextAlign.center, style: t.bodyMedium),
         ]),
       ),
+    );
+  }
+}
+
+/// Shown after a customer has already placed their order for the open cycle —
+/// the link is closed for them until the next window.
+class _AlreadyOrderedState extends StatelessWidget {
+  final OrderCycle cycle;
+  const _AlreadyOrderedState({required this.cycle});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(color: AppColors.successWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
+            child: const Icon(Icons.verified_rounded, size: 38, color: AppColors.success),
+          ),
+          const SizedBox(height: 18),
+          Text("You've ordered for ${cycle.title}", style: t.titleLarge, textAlign: TextAlign.center),
+          const SizedBox(height: 6),
+          Text(
+            'The order link is now closed for you this week. Check it under My Orders — the link reopens with the next window.',
+            textAlign: TextAlign.center,
+            style: t.bodyMedium,
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Horizontal chips to switch between the open order windows a customer can use
+/// (two windows in a week, and/or designation-scoped links). Already-ordered
+/// windows show a check.
+class _WindowSelector extends StatelessWidget {
+  final List<OrderCycle> windows;
+  final String selectedId;
+  final Set<String> orderedIds;
+  final ValueChanged<String> onSelect;
+  const _WindowSelector({required this.windows, required this.selectedId, required this.orderedIds, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Icon(Icons.event_available_rounded, size: 16, color: AppColors.brand),
+          const SizedBox(width: 6),
+          Text('Choose an order window', style: t.titleSmall),
+        ]),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final w in windows)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    selected: w.id == selectedId,
+                    onSelected: (_) => onSelect(w.id),
+                    avatar: orderedIds.contains(w.id)
+                        ? const Icon(Icons.check_circle_rounded, size: 16, color: AppColors.success)
+                        : (w.isPublic ? null : const Icon(Icons.badge_outlined, size: 16)),
+                    label: Text(w.title.replaceFirst('Week ', 'Wk ')),
+                    selectedColor: AppColors.brandWash,
+                    labelStyle: TextStyle(fontWeight: FontWeight.w600, color: w.id == selectedId ? AppColors.brandDark : null),
+                    shape: const StadiumBorder(),
+                    side: BorderSide(color: w.id == selectedId ? AppColors.brand : scheme.outline),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Compact "you've ordered in this window" banner shown when more than one
+/// window is open, so the selector stays visible to switch to another.
+class _AlreadyOrderedInline extends StatelessWidget {
+  final OrderCycle cycle;
+  const _AlreadyOrderedInline({required this.cycle});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.successWash,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.verified_rounded, color: AppColors.success, size: 28),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("You've ordered for ${cycle.title}", style: t.titleSmall),
+                const SizedBox(height: 4),
+                Text('This window is closed for you. Pick another open window above, or check My Orders.', style: t.bodySmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The prominent master ration bar — total entitlement used across all food
+/// categories for the customer's zone. When it fills, nothing more can be added.
+class _MasterRationBar extends StatelessWidget {
+  final double used;
+  final double limit;
+  final String level;
+  const _MasterRationBar({required this.used, required this.limit, required this.level});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final ratio = limit <= 0 ? 0.0 : (used / limit).clamp(0.0, 1.0);
+    final full = used >= limit - 0.0001;
+    final color = full ? AppColors.warning : AppColors.brand;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.shield_moon_rounded, size: 18, color: color),
+              const SizedBox(width: 8),
+              Text('Your ration · $level zone', style: t.titleSmall),
+              const Spacer(),
+              Text('${fmtNum(used)} / ${fmtNum(limit)}', style: t.titleSmall?.copyWith(color: color, fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: ratio),
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOut,
+              builder: (_, v, _) => LinearProgressIndicator(value: v, minHeight: 10, color: color, backgroundColor: scheme.surfaceContainerHighest),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            full ? 'Master ration full — remove an item to add another' : 'RIK $level entitlement · your full ration for this week',
+            style: t.bodySmall?.copyWith(color: full ? AppColors.warning : scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Per-category ration bar with an animated progress fill. Shown above each
+/// category while ordering so the customer sees how much of their allowance is
+/// left (rule-based limit enforced in [_OrderFormState._setQty]).
+class _CategoryQuotaBar extends StatelessWidget {
+  final Category category;
+  final double picked;
+  final double quota;
+  const _CategoryQuotaBar({required this.category, required this.picked, required this.quota});
+
+  @override
+  Widget build(BuildContext context) {
+    if (quota <= 0) return const SizedBox.shrink();
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final ratio = (picked / quota).clamp(0.0, 1.0);
+    final full = picked >= quota - 0.0001;
+    final color = full ? AppColors.warning : category.color;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              full ? '${category.name} ration full' : '${category.name} ration',
+              style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: full ? AppColors.warning : scheme.onSurfaceVariant),
+            ),
+            const Spacer(),
+            Text('${fmtNum(picked)} / ${fmtNum(quota)}', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: color)),
+          ],
+        ),
+        const SizedBox(height: 5),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: ratio),
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+            builder: (_, v, _) => LinearProgressIndicator(
+              value: v,
+              minHeight: 7,
+              color: color,
+              backgroundColor: scheme.surfaceContainerHighest,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -270,12 +647,17 @@ class _Categories extends StatelessWidget {
   }
 }
 
-/// Compact grocery-style product tile (Flipkart/Blinkit feel).
+/// Compact product tile. No stock is shown (ration system); [maxQty] is the
+/// per-item ration cap that gates how much can be added.
 class _ProductTile extends StatefulWidget {
   final Item item;
   final double qty;
+  final double maxQty;
+  final String maxLabel;
+  final double step;
+  final bool inLieu;
   final ValueChanged<double> onChanged;
-  const _ProductTile({required this.item, required this.qty, required this.onChanged});
+  const _ProductTile({required this.item, required this.qty, required this.maxQty, required this.maxLabel, required this.step, required this.inLieu, required this.onChanged});
 
   @override
   State<_ProductTile> createState() => _ProductTileState();
@@ -290,10 +672,10 @@ class _ProductTileState extends State<_ProductTile> {
     final qty = widget.qty;
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final out = item.status == StockStatus.out;
-    final low = item.status == StockStatus.low;
-    final step = _stepFor(item.unit);
+    final step = widget.step;
     final picked = qty > 0;
+    final canAddMore = qty + step <= widget.maxQty + 1e-9;
+    final atLimit = widget.maxQty <= 0;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
@@ -301,7 +683,7 @@ class _ProductTileState extends State<_ProductTile> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
         curve: Curves.easeOut,
-        transform: Matrix4.translationValues(0, (_hover && !out) ? -3 : 0, 0),
+        transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
         decoration: BoxDecoration(
           color: scheme.surface,
           borderRadius: BorderRadius.circular(AppRadius.md),
@@ -320,7 +702,7 @@ class _ProductTileState extends State<_ProductTile> {
                     height: 72,
                     color: item.cat.color.withValues(alpha: 0.12),
                     alignment: Alignment.center,
-                    child: Opacity(opacity: out ? 0.45 : 1, child: Text(item.emoji, style: const TextStyle(fontSize: 34))),
+                    child: Text(item.emoji, style: const TextStyle(fontSize: 34)),
                   ),
                   if (picked)
                     Positioned(
@@ -332,24 +714,14 @@ class _ProductTileState extends State<_ProductTile> {
                         child: const Icon(Icons.check_rounded, size: 12, color: Colors.white),
                       ),
                     ),
-                  if (out)
+                  if (widget.maxLabel.isNotEmpty)
                     Positioned(
                       top: 6,
                       left: 6,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                        decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(AppRadius.pill)),
-                        child: const Text('Out', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
-                      ),
-                    )
-                  else if (low)
-                    Positioned(
-                      top: 6,
-                      left: 6,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                        decoration: BoxDecoration(color: AppColors.warning, borderRadius: BorderRadius.circular(AppRadius.pill)),
-                        child: Text('Only ${fmtNum(item.currentQty)}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+                        decoration: BoxDecoration(color: scheme.surface.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(AppRadius.pill)),
+                        child: Text(widget.maxLabel, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 10, fontWeight: FontWeight.w700)),
                       ),
                     ),
                 ],
@@ -363,29 +735,30 @@ class _ProductTileState extends State<_ProductTile> {
                       height: 34,
                       child: Text(item.name, style: t.titleSmall?.copyWith(fontSize: 12.5, height: 1.15), maxLines: 2, overflow: TextOverflow.ellipsis),
                     ),
-                    Text(out ? 'Unavailable' : '${fmtNum(item.currentQty)} ${item.unit} left', style: t.bodySmall?.copyWith(fontSize: 11, color: out ? AppColors.danger : scheme.onSurfaceVariant)),
+                    Text(
+                      widget.inLieu ? 'In lieu · per ${item.unit}' : 'per ${item.unit}',
+                      style: t.bodySmall?.copyWith(fontSize: 11, color: widget.inLieu ? AppColors.accent : scheme.onSurfaceVariant, fontWeight: widget.inLieu ? FontWeight.w700 : FontWeight.w400),
+                    ),
                     const SizedBox(height: 8),
                     SizedBox(
                       height: 34,
-                      child: out
-                          ? const SizedBox.shrink()
-                          : (!picked
-                              ? OutlinedButton(
-                                  onPressed: () => widget.onChanged(step),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: AppColors.brand,
-                                    side: const BorderSide(color: AppColors.brand),
-                                    padding: EdgeInsets.zero,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
-                                  ),
-                                  child: const Text('ADD', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5)),
-                                )
-                              : _MiniStepper(
-                                  qty: qty,
-                                  unit: item.unit,
-                                  onMinus: () => widget.onChanged(qty - step),
-                                  onPlus: qty + step <= item.currentQty ? () => widget.onChanged(qty + step) : null,
-                                )),
+                      child: !picked
+                          ? OutlinedButton(
+                              onPressed: atLimit ? null : () => widget.onChanged(step),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppColors.brand,
+                                side: BorderSide(color: atLimit ? scheme.outline : AppColors.brand),
+                                padding: EdgeInsets.zero,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
+                              ),
+                              child: Text(atLimit ? 'LIMIT' : 'ADD', style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                            )
+                          : _MiniStepper(
+                              qty: qty,
+                              unit: item.unit,
+                              onMinus: () => widget.onChanged(qty - step),
+                              onPlus: canAddMore ? () => widget.onChanged(qty + step) : null,
+                            ),
                     ),
                   ],
                 ),
@@ -475,9 +848,11 @@ class _ReviewSheet extends StatefulWidget {
   final Map<String, double> picked;
   final AppStore store;
   final String name;
+  final double Function(Item) capFor;
+  final double Function(Item) stepFor;
   final void Function(Item, double) onChange;
   final VoidCallback onConfirm;
-  const _ReviewSheet({required this.picked, required this.store, required this.name, required this.onChange, required this.onConfirm});
+  const _ReviewSheet({required this.picked, required this.store, required this.name, required this.capFor, required this.stepFor, required this.onChange, required this.onConfirm});
 
   @override
   State<_ReviewSheet> createState() => _ReviewSheetState();
@@ -519,7 +894,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                         final e = lines[i];
                         final item = items[e.key];
                         if (item == null) return const SizedBox.shrink();
-                        final step = _stepFor(item.unit);
+                        final step = widget.stepFor(item);
                         return Row(
                           children: [
                             EmojiTile(item.emoji, color: item.cat.color, size: 42),
@@ -529,7 +904,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(item.name, style: t.titleSmall),
-                                  Text('${fmtNum(item.currentQty)} ${item.unit} in stock', style: t.bodySmall),
+                                  Text('per ${item.unit}', style: t.bodySmall),
                                 ],
                               ),
                             ),
@@ -540,7 +915,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                                 qty: e.value,
                                 unit: item.unit,
                                 onMinus: () { widget.onChange(item, e.value - step); setState(() {}); },
-                                onPlus: e.value + step <= item.currentQty ? () { widget.onChange(item, e.value + step); setState(() {}); } : null,
+                                onPlus: e.value + step <= widget.capFor(item) + 1e-9 ? () { widget.onChange(item, e.value + step); setState(() {}); } : null,
                               ),
                             ),
                           ],
