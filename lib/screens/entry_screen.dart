@@ -115,7 +115,7 @@ class EntryScreen extends StatelessWidget {
                               color: AppColors.brand,
                               title: 'Admin Console',
                               subtitle: kIsWeb
-                                  ? 'Full control over stock, orders, analytics and reports'
+                                  ? 'Full control over stock, orders and reports'
                                   : 'Limited on the app. Full tools on the website',
                               onTap: () => _enterStaff(context, UserRole.admin),
                             );
