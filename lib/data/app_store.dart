@@ -35,6 +35,60 @@ class AppStore extends ChangeNotifier {
 
   String storeName = 'Central Store';
 
+  // ---- Ration zones (admin-editable criteria) -----------------------------
+  final Map<String, double> _zoneMaster = {for (final z in kRationZones) z.name: z.masterLimit};
+  final Map<String, Map<String, double>> _zoneCats = {for (final z in kRationZones) z.name: Map<String, double>.of(z.categoryLimits)};
+  final Map<String, Map<String, double>> _zoneItemMax = {for (final z in kRationZones) z.name: Map<String, double>.of(z.itemMax)};
+
+  List<String> get zoneNames => kZoneNames;
+
+  /// The current (possibly admin-edited) criteria for a zone.
+  RationZone zoneFor(String name) {
+    final base = rationZoneFor(name);
+    return RationZone(
+      name: base.name,
+      level: base.level,
+      masterLimit: _zoneMaster[base.name] ?? base.masterLimit,
+      categoryLimits: _zoneCats[base.name] ?? base.categoryLimits,
+      itemMax: _zoneItemMax[base.name] ?? base.itemMax,
+      defaultCategoryLimit: base.defaultCategoryLimit,
+    );
+  }
+
+  void setZoneMaster(String zone, double value) {
+    _zoneMaster[zone] = value < 0 ? 0 : value;
+    notifyListeners();
+  }
+
+  void setZoneCategoryLimit(String zone, String category, double value) {
+    (_zoneCats[zone] ??= {})[category] = value < 0 ? 0 : value;
+    notifyListeners();
+  }
+
+  void setZoneItemMax(String zone, String itemName, double value) {
+    final m = _zoneItemMax[zone] ??= {};
+    if (value <= 0) {
+      m.remove(itemName);
+    } else {
+      m[itemName] = value;
+    }
+    notifyListeners();
+  }
+
+  /// Customers assigned to [zone].
+  List<AppUser> customersInZone(String zone) =>
+      users.where((u) => u.role == UserRole.customer && u.zone == zone).toList();
+
+  /// Order links (cycles) scoped to [zone], newest first.
+  List<OrderCycle> linksForZone(String zone) =>
+      cyclesByRecent.where((c) => c.designation == zone).toList();
+
+  /// Orders placed against any link in [zone].
+  List<Order> ordersInZone(String zone) {
+    final ids = linksForZone(zone).map((c) => c.id).toSet();
+    return orders.where((o) => ids.contains(o.cycleId)).toList();
+  }
+
   /// Non-null once connected to Supabase. When null, everything runs on the
   /// seeded in-memory data.
   SupabaseService? _sb;
@@ -169,6 +223,23 @@ class AppStore extends ChangeNotifier {
   /// Cycle customers place orders against — prefers an open week, otherwise the latest.
   OrderCycle get orderingCycle => activeCycle;
 
+  /// Every order window that is currently open. There can be more than one —
+  /// two windows in a week, or several per-designation links live at once.
+  List<OrderCycle> get openCycles =>
+      cycles.where((c) => c.status == CycleStatus.open).toList()
+        ..sort((a, b) => a.weekStart.compareTo(b.weekStart));
+
+  /// Open windows a customer with [designation] may order in. A public window
+  /// (empty designation) is open to everyone; a scoped one must match the
+  /// customer's designation (case-insensitive).
+  List<OrderCycle> openCyclesFor(String designation) {
+    final d = designation.trim().toLowerCase();
+    return openCycles.where((c) {
+      if (c.isPublic) return true;
+      return c.designation.trim().toLowerCase() == d;
+    }).toList();
+  }
+
   /// True only when there is an OPEN order window and stock to order.
   /// (Falls back cycle may exist but be closed — then ordering is disabled.)
   bool get canPlaceOrders =>
@@ -199,6 +270,20 @@ class AppStore extends ChangeNotifier {
     final perDay = consumed / _daysElapsed;
     if (perDay <= 0) return null;
     return (item.currentQty / perDay).floor();
+  }
+
+  /// Fair-share fraction: in a single order a customer/unit may take at most
+  /// this share of a category's currently-available stock. Tweak to make the
+  /// per-category quota tighter or looser.
+  static const double categoryFairShare = 0.5;
+
+  /// Rule-based ordering quota for a category (in units), based on a fair share
+  /// of what's currently in stock so one unit can't claim everything.
+  double categoryQuota(String cat) {
+    final stock = items
+        .where((i) => i.category == cat && i.currentQty > 0)
+        .fold<double>(0, (s, i) => s + i.currentQty);
+    return stock * categoryFairShare;
   }
 
   /// Units remaining grouped by category (for the dashboard chart).
@@ -284,20 +369,23 @@ class AppStore extends ChangeNotifier {
     required String customerName,
     required String customerPhone,
     required Map<String, double> cart,
+    String? cycleId,
   }) {
+    final targetCycleId = cycleId ?? orderingCycle.id;
     final lines = <OrderLine>[];
     cart.forEach((itemId, qty) {
       if (qty <= 0) return;
       final item = items.firstWhere((i) => i.id == itemId);
-      final take = min(qty, item.currentQty);
-      if (take <= 0) return;
-      item.currentQty -= take;
+      // Ration system: availability never blocks an order — record the full
+      // requested quantity. Stock is still decremented (for admin records),
+      // floored at zero so it never reads negative.
+      item.currentQty = (item.currentQty - qty).clamp(0, double.infinity).toDouble();
       lines.add(OrderLine(
         itemId: item.id,
         name: item.name,
         emoji: item.emoji,
         unit: item.unit,
-        qty: take,
+        qty: qty,
       ));
     });
     if (lines.isEmpty) {
@@ -306,7 +394,7 @@ class AppStore extends ChangeNotifier {
     final localId = 'ORD-${_orderSeq++}';
     final order = Order(
       id: localId,
-      cycleId: orderingCycle.id,
+      cycleId: targetCycleId,
       customerName: customerName,
       customerPhone: customerPhone,
       lines: lines,
@@ -319,7 +407,7 @@ class AppStore extends ChangeNotifier {
     final sb = _sb;
     if (sb != null) {
       _fire(sb
-          .placeOrder(cycleId: orderingCycle.id, name: customerName, phone: customerPhone, cart: cart)
+          .placeOrder(cycleId: targetCycleId, name: customerName, phone: customerPhone, cart: cart)
           .then((remoteId) async {
         final sid = remoteId.toString();
         final idx = orders.indexWhere((o) => o.id == localId);
@@ -533,8 +621,9 @@ class AppStore extends ChangeNotifier {
     required UserRole role,
     required String phone,
     required String unit,
+    String zone = '',
   }) {
-    users.add(AppUser(id: 'U${_userSeq++}', name: name, role: role, phone: phone, unit: unit));
+    users.add(AppUser(id: 'U${_userSeq++}', name: name, role: role, phone: phone, unit: unit, zone: zone));
     notifyListeners();
     final sb = _sb;
     if (sb != null) {
@@ -557,22 +646,33 @@ class AppStore extends ChangeNotifier {
   List<AppUser> get staff => users.where((u) => u.role != UserRole.customer).toList();
   List<AppUser> get customers => users.where((u) => u.role == UserRole.customer).toList();
 
-  OrderCycle openNewCycle() {
-    final previouslyOpen = cycles.where((c) => c.status == CycleStatus.open).map((c) => c.id).toList();
-    for (final c in cycles) {
-      if (c.status == CycleStatus.open) c.status = CycleStatus.closed;
+  /// Open a new ordering window. [designation] scopes it to an audience (empty =
+  /// everyone). [closeOthers] false keeps existing open windows live too, so you
+  /// can run two windows in a week or several per-designation links at once.
+  OrderCycle openNewCycle({String designation = '', bool closeOthers = true}) {
+    final previouslyOpen = <String>[];
+    if (closeOthers) {
+      for (final c in cycles) {
+        if (c.status == CycleStatus.open) {
+          previouslyOpen.add(c.id);
+          c.status = CycleStatus.closed;
+        }
+      }
     }
     final last = cycles.isNotEmpty ? cycles.first : null;
     final start = (last?.weekEnd ?? DateTime.now()).add(const Duration(days: 1));
     final end = start.add(const Duration(days: 6));
     final num = int.tryParse((last?.title ?? '23').replaceAll(RegExp(r'[^0-9]'), '')) ?? 23;
+    final label = designation.trim();
+    final slug = label.isEmpty ? '' : '-${label.replaceAll(RegExp(r'\s+'), '').toLowerCase()}';
     final cycle = OrderCycle(
-      id: 'CY-${num + 1}',
-      title: 'Week ${num + 1}',
+      id: 'CY-${num + 1}$slug',
+      title: label.isEmpty ? 'Week ${num + 1}' : 'Week ${num + 1} · $label',
       weekStart: start,
       weekEnd: end,
       status: CycleStatus.open,
       shareToken: _token(),
+      designation: label,
     );
     cycles.insert(0, cycle);
     notifyListeners();
@@ -592,6 +692,12 @@ class AppStore extends ChangeNotifier {
     _fire(_sb?.updateCycleStatus(cycle.id, CycleStatus.closed).then((_) => reload()));
   }
 
+  void reopenCycle(OrderCycle cycle) {
+    cycle.status = CycleStatus.open;
+    notifyListeners();
+    _fire(_sb?.updateCycleStatus(cycle.id, CycleStatus.open).then((_) => reload()));
+  }
+
   // ---- Helpers ------------------------------------------------------------
 
   static String _fmt(double v) =>
@@ -606,85 +712,62 @@ class AppStore extends ChangeNotifier {
   // ---- Seed ---------------------------------------------------------------
 
   void _seed() {
-    items.addAll([
-      Item(id: 'I1', name: 'Basmati Rice', emoji: '🍚', category: 'Grains', unit: 'kg', openingQty: 1200, currentQty: 920, reorderLevel: 300),
-      Item(id: 'I2', name: 'Wheat Flour (Atta)', emoji: '🌾', category: 'Grains', unit: 'kg', openingQty: 800, currentQty: 540, reorderLevel: 200),
-      Item(id: 'I3', name: 'Toor Dal', emoji: '🫘', category: 'Pulses', unit: 'kg', openingQty: 400, currentQty: 150, reorderLevel: 160),
-      Item(id: 'I4', name: 'Chana Dal', emoji: '🟡', category: 'Pulses', unit: 'kg', openingQty: 300, currentQty: 210, reorderLevel: 100),
-      Item(id: 'I5', name: 'Potato', emoji: '🥔', category: 'Vegetables', unit: 'kg', openingQty: 600, currentQty: 430, reorderLevel: 150),
-      Item(id: 'I6', name: 'Onion', emoji: '🧅', category: 'Vegetables', unit: 'kg', openingQty: 500, currentQty: 205, reorderLevel: 150),
-      Item(id: 'I7', name: 'Tomato', emoji: '🍅', category: 'Vegetables', unit: 'kg', openingQty: 300, currentQty: 70, reorderLevel: 90),
-      Item(id: 'I8', name: 'Green Chilli', emoji: '🌶️', category: 'Vegetables', unit: 'kg', openingQty: 60, currentQty: 11, reorderLevel: 16),
-      Item(id: 'I9', name: 'Carrot', emoji: '🥕', category: 'Vegetables', unit: 'kg', openingQty: 180, currentQty: 96, reorderLevel: 50),
-      Item(id: 'I10', name: 'Banana', emoji: '🍌', category: 'Fruits', unit: 'dozen', openingQty: 200, currentQty: 42, reorderLevel: 55),
-      Item(id: 'I11', name: 'Apple', emoji: '🍎', category: 'Fruits', unit: 'kg', openingQty: 250, currentQty: 175, reorderLevel: 60),
-      Item(id: 'I12', name: 'Orange', emoji: '🍊', category: 'Fruits', unit: 'kg', openingQty: 200, currentQty: 130, reorderLevel: 50),
-      Item(id: 'I13', name: 'Milk', emoji: '🥛', category: 'Dairy', unit: 'litre', openingQty: 400, currentQty: 250, reorderLevel: 110),
-      Item(id: 'I14', name: 'Eggs', emoji: '🥚', category: 'Dairy', unit: 'dozen', openingQty: 350, currentQty: 120, reorderLevel: 100),
-      Item(id: 'I15', name: 'Paneer', emoji: '🧀', category: 'Dairy', unit: 'kg', openingQty: 120, currentQty: 64, reorderLevel: 45),
-      Item(id: 'I16', name: 'Bread', emoji: '🍞', category: 'Bakery', unit: 'packet', openingQty: 300, currentQty: 0, reorderLevel: 60),
-      Item(id: 'I17', name: 'Butter', emoji: '🧈', category: 'Dairy', unit: 'kg', openingQty: 90, currentQty: 58, reorderLevel: 30),
-      Item(id: 'I18', name: 'Cooking Oil', emoji: '🛢️', category: 'Essentials', unit: 'litre', openingQty: 300, currentQty: 235, reorderLevel: 80),
-      Item(id: 'I19', name: 'Sugar', emoji: '🍬', category: 'Essentials', unit: 'kg', openingQty: 250, currentQty: 188, reorderLevel: 70),
-      Item(id: 'I20', name: 'Tea', emoji: '🍵', category: 'Essentials', unit: 'kg', openingQty: 80, currentQty: 22, reorderLevel: 26),
-      Item(id: 'I21', name: 'Salt', emoji: '🧂', category: 'Essentials', unit: 'kg', openingQty: 150, currentQty: 118, reorderLevel: 40),
-    ]);
+    // Build the catalogue from the real RIK Officers scale. Stock is effectively
+    // unlimited (ration) so quantities are set high and never shown to customers.
+    var idx = 0;
+    for (final cat in kRikOfficers) {
+      for (final a in cat.articles) {
+        items.add(Item(
+          id: 'R${idx++}',
+          name: a.name,
+          emoji: cat.emoji,
+          category: cat.name,
+          unit: cat.unit,
+          openingQty: 100000,
+          currentQty: 100000,
+          reorderLevel: 0,
+        ));
+      }
+    }
 
     users.addAll(const [
-      AppUser(id: 'U1', name: 'Arjun Mehta', role: UserRole.admin, phone: '+91 98200 11001', unit: 'Central Store'),
-      AppUser(id: 'U2', name: 'Priya Nair', role: UserRole.worker, phone: '+91 98200 11002', unit: 'Store Floor'),
-      AppUser(id: 'U3', name: 'Rahul Verma', role: UserRole.worker, phone: '+91 98200 11003', unit: 'Store Floor'),
-      AppUser(id: 'U4', name: 'Alpha Mess', role: UserRole.customer, phone: '+91 90000 22001', unit: 'Block A'),
-      AppUser(id: 'U5', name: 'Bravo Mess', role: UserRole.customer, phone: '+91 90000 22002', unit: 'Block B'),
-      AppUser(id: 'U6', name: 'Delta Canteen', role: UserRole.customer, phone: '+91 90000 22003', unit: 'Block D'),
-      AppUser(id: 'U7', name: 'Charlie Galley', role: UserRole.customer, phone: '+91 90000 22004', unit: 'Block C'),
+      AppUser(id: 'U1', name: 'Cdr Arjun Mehta', role: UserRole.admin, phone: '+91 98200 11001', unit: 'Logistics'),
+      AppUser(id: 'U2', name: 'PO Priya Nair', role: UserRole.worker, phone: '+91 98200 11002', unit: 'Ration Store'),
+      AppUser(id: 'U3', name: 'LS Rahul Verma', role: UserRole.worker, phone: '+91 98200 11003', unit: 'Ration Store'),
+      AppUser(id: 'U4', name: 'Wardroom Mess', role: UserRole.customer, phone: '+91 90000 22001', unit: 'Wardroom', zone: 'Officers'),
+      AppUser(id: 'U5', name: 'Lt Bravo', role: UserRole.customer, phone: '+91 90000 22002', unit: 'OM Block A', zone: 'Officers'),
+      AppUser(id: 'U6', name: 'Lt Cdr Delta', role: UserRole.customer, phone: '+91 90000 22003', unit: 'OM Block B', zone: 'Officers'),
+      AppUser(id: 'U7', name: 'Sub Lt Charlie', role: UserRole.customer, phone: '+91 90000 22004', unit: 'OM Block C', zone: 'Officers'),
     ]);
 
     cycles.addAll([
-      OrderCycle(id: 'CY-23', title: 'Week 23', weekStart: DateTime(2026, 6, 9), weekEnd: DateTime(2026, 6, 15), status: CycleStatus.open, shareToken: 'wk23a7f3'),
-      OrderCycle(id: 'CY-22', title: 'Week 22', weekStart: DateTime(2026, 5, 26), weekEnd: DateTime(2026, 6, 1), status: CycleStatus.closed, shareToken: 'wk22b1c9'),
-      OrderCycle(id: 'CY-21', title: 'Week 21', weekStart: DateTime(2026, 5, 19), weekEnd: DateTime(2026, 5, 25), status: CycleStatus.closed, shareToken: 'wk21d4e2'),
+      OrderCycle(id: 'CY-23', title: 'RIK · Officers · Wk 23', weekStart: DateTime(2026, 6, 9), weekEnd: DateTime(2026, 6, 15), status: CycleStatus.open, shareToken: 'rikoff23', designation: 'Officers'),
+      OrderCycle(id: 'CY-22', title: 'RIK · Officers · Wk 22', weekStart: DateTime(2026, 6, 2), weekEnd: DateTime(2026, 6, 8), status: CycleStatus.closed, shareToken: 'rikoff22', designation: 'Officers'),
+      OrderCycle(id: 'CY-21', title: 'RIK · Officers · Wk 21', weekStart: DateTime(2026, 5, 26), weekEnd: DateTime(2026, 6, 1), status: CycleStatus.closed, shareToken: 'rikoff21', designation: 'Officers'),
     ]);
+
+    Item pick(String name) => items.firstWhere((i) => i.name == name, orElse: () => items.first);
+    OrderLine line(String name, double qty) {
+      final it = pick(name);
+      return OrderLine(itemId: it.id, name: it.name, emoji: it.emoji, unit: it.unit, qty: qty);
+    }
 
     final now = DateTime.now();
     orders.addAll([
       Order(
-        id: 'ORD-${_orderSeq++}',
-        cycleId: 'CY-23',
-        customerName: 'Alpha Mess',
-        customerPhone: '+91 90000 22001',
-        status: OrderStatus.confirmed,
-        createdAt: now.subtract(const Duration(hours: 3)),
-        lines: const [
-          OrderLine(itemId: 'I1', name: 'Basmati Rice', emoji: '🍚', unit: 'kg', qty: 40),
-          OrderLine(itemId: 'I13', name: 'Milk', emoji: '🥛', unit: 'litre', qty: 30),
-          OrderLine(itemId: 'I14', name: 'Eggs', emoji: '🥚', unit: 'dozen', qty: 12),
-        ],
+        id: 'ORD-${_orderSeq++}', cycleId: 'CY-23', customerName: 'Wardroom Mess', customerPhone: '+91 90000 22001',
+        status: OrderStatus.confirmed, createdAt: now.subtract(const Duration(hours: 3)),
+        lines: [line('Atta 1 kg', 3), line('Meat Fresh 1 kg', 1.5), line('Tomato', 1), line('Eggs', 14)],
       ),
       Order(
-        id: 'ORD-${_orderSeq++}',
-        cycleId: 'CY-23',
-        customerName: 'Bravo Mess',
-        customerPhone: '+91 90000 22002',
-        status: OrderStatus.pending,
-        createdAt: now.subtract(const Duration(hours: 6)),
-        lines: const [
-          OrderLine(itemId: 'I5', name: 'Potato', emoji: '🥔', unit: 'kg', qty: 25),
-          OrderLine(itemId: 'I6', name: 'Onion', emoji: '🧅', unit: 'kg', qty: 20),
-          OrderLine(itemId: 'I18', name: 'Cooking Oil', emoji: '🛢️', unit: 'litre', qty: 10),
-        ],
+        id: 'ORD-${_orderSeq++}', cycleId: 'CY-23', customerName: 'Lt Bravo', customerPhone: '+91 90000 22002',
+        status: OrderStatus.pending, createdAt: now.subtract(const Duration(hours: 6)),
+        lines: [line('Potato', 0.75), line('Onion', 0.4), line('Refined Oil 1 L', 0.5), line('Sugar 1 kg', 0.6)],
       ),
       Order(
-        id: 'ORD-${_orderSeq++}',
-        cycleId: 'CY-23',
-        customerName: 'Delta Canteen',
-        customerPhone: '+91 90000 22003',
-        status: OrderStatus.fulfilled,
-        createdAt: now.subtract(const Duration(days: 1, hours: 2)),
-        lines: const [
-          OrderLine(itemId: 'I2', name: 'Wheat Flour (Atta)', emoji: '🌾', unit: 'kg', qty: 30),
-          OrderLine(itemId: 'I11', name: 'Apple', emoji: '🍎', unit: 'kg', qty: 15),
-        ],
+        id: 'ORD-${_orderSeq++}', cycleId: 'CY-22', customerName: 'Lt Cdr Delta', customerPhone: '+91 90000 22003',
+        status: OrderStatus.fulfilled, createdAt: now.subtract(const Duration(days: 2, hours: 2)),
+        lines: [line('India Gate Rozana 1 kg', 3), line('Apple Delicious', 1.6)],
       ),
     ]);
   }
