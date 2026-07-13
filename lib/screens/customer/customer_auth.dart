@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/app_store.dart';
 import '../../main.dart';
+import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/app_prefs.dart';
 import '../entry_screen.dart';
@@ -35,21 +36,25 @@ void enterCustomerApp(
   required String phone,
   String email = '',
   String address = '',
+  String designation = '',
   bool guest = false,
   bool isNewUser = false,
 }) {
   final existing = SavedProfile.load();
+  // Keep an existing designation if this entry didn't supply one (e.g. login).
+  final desig = designation.trim().isNotEmpty ? designation.trim() : (existing?.designation ?? '');
   SavedProfile(
     name: name,
     phone: phone,
     email: email,
     address: address,
+    designation: desig,
     guest: guest,
     accountCreatedAt: isNewUser ? DateTime.now() : existing?.accountCreatedAt,
   ).save();
   final Widget target = (isNewUser && !SavedProfile.onboardingDone)
-      ? OnboardingScreen(name: name, phone: phone, email: email, address: address)
-      : CustomerShell(name: name, phone: phone, email: email, address: address);
+      ? OnboardingScreen(name: name, phone: phone, email: email, address: address, designation: desig)
+      : CustomerShell(name: name, phone: phone, email: email, address: address, designation: desig);
   final route = PageRouteBuilder(
     transitionDuration: const Duration(milliseconds: 420),
     pageBuilder: (context, animation, secondaryAnimation) => target,
@@ -643,6 +648,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _address = TextEditingController();
+  String _zone = kZoneNames.first;
   bool _loading = false;
   bool _obscure = true;
   String? _error;
@@ -680,7 +686,12 @@ class _CustomerRegisterState extends State<CustomerRegister> {
       await store.signUpCustomer(_email.text.trim(), _password.text, name, _phone.text.trim());
       if (!mounted) return;
       enterCustomerApp(context,
-          name: name, phone: _phone.text.trim(), email: _email.text.trim(), address: _address.text.trim(), isNewUser: true);
+          name: name,
+          phone: _phone.text.trim(),
+          email: _email.text.trim(),
+          address: _address.text.trim(),
+          designation: _zone,
+          isNewUser: true);
     } catch (e) {
       setState(() => _error = _friendly(e));
     } finally {
@@ -714,6 +725,19 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                   TextField(controller: _name, decoration: const InputDecoration(labelText: 'Name / unit', prefixIcon: Icon(Icons.storefront_rounded))),
                   const SizedBox(height: 14),
                   TextField(controller: _phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone', prefixIcon: Icon(Icons.phone_rounded))),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: _zone,
+                    decoration: const InputDecoration(
+                      labelText: 'Ration scale',
+                      helperText: 'Your RIK entitlement scale — decides what you can draw',
+                      prefixIcon: Icon(Icons.shield_moon_outlined),
+                    ),
+                    items: [
+                      for (final z in kZoneNames) DropdownMenuItem(value: z, child: Text(z)),
+                    ],
+                    onChanged: (v) => setState(() => _zone = v ?? _zone),
+                  ),
                   const SizedBox(height: 14),
                   TextField(controller: _address, maxLines: 2, decoration: const InputDecoration(labelText: 'Delivery address', prefixIcon: Icon(Icons.location_on_outlined))),
                   const SizedBox(height: 14),
@@ -813,7 +837,7 @@ void quickStartSheet(BuildContext context) {
               if (name.isEmpty) return;
               Navigator.pop(sheetCtx);
               enterCustomerApp(context,
-                  name: name, phone: phoneC.text.trim(), address: addrC.text.trim(), guest: true, isNewUser: true);
+                  name: name, phone: phoneC.text.trim(), address: addrC.text.trim(), designation: kZoneNames.first, guest: true, isNewUser: true);
             },
             child: const Text('Continue'),
           ),
