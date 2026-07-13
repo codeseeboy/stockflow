@@ -25,7 +25,8 @@ class CustomerShell extends StatefulWidget {
   final String phone;
   final String email;
   final String address;
-  const CustomerShell({super.key, required this.name, required this.phone, this.email = '', this.address = ''});
+  final String designation;
+  const CustomerShell({super.key, required this.name, required this.phone, this.email = '', this.address = '', this.designation = ''});
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -118,8 +119,8 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      _HomeTab(name: widget.name, phone: widget.phone, onOrderNow: () => setState(() => _index = 1)),
-      OrderForm(name: widget.name, phone: widget.phone),
+      _HomeTab(name: widget.name, phone: widget.phone, designation: widget.designation, onOrderNow: () => setState(() => _index = 1)),
+      OrderForm(name: widget.name, phone: widget.phone, designation: widget.designation),
       _MyOrdersTab(name: widget.name, phone: widget.phone, onOrderNow: () => setState(() => _index = 1)),
       _ProfileTab(name: widget.name, phone: widget.phone, email: widget.email, address: widget.address),
     ];
@@ -413,8 +414,9 @@ double _itemQtyInCycle(List<Order> orders, String cycleId, String itemId) {
 class _HomeTab extends StatelessWidget {
   final String name;
   final String phone;
+  final String designation;
   final VoidCallback onOrderNow;
-  const _HomeTab({required this.name, required this.phone, required this.onOrderNow});
+  const _HomeTab({required this.name, required this.phone, required this.designation, required this.onOrderNow});
 
   @override
   Widget build(BuildContext context) {
@@ -435,7 +437,7 @@ class _HomeTab extends StatelessWidget {
             children: [
               _HomeGreeting(name: displayName),
               const SizedBox(height: 14),
-              _OrderStatusCard(store: store, onOrderNow: onOrderNow),
+              _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
               const SizedBox(height: 14),
               _AvailableItemsCard(store: store, onOrderNow: onOrderNow),
               const SizedBox(height: 14),
@@ -527,14 +529,17 @@ class _HomeGreeting extends StatelessWidget {
 
 class _OrderStatusCard extends StatelessWidget {
   final AppStore store;
+  final String designation;
   final VoidCallback onOrderNow;
-  const _OrderStatusCard({required this.store, required this.onOrderNow});
+  const _OrderStatusCard({required this.store, required this.designation, required this.onOrderNow});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final cycle = store.orderingCycle;
-    final open = store.canPlaceOrders;
+    final windows = store.openCyclesFor(designation);
+    final open = windows.isNotEmpty && store.items.isNotEmpty;
+    final multi = windows.length > 1;
+    final cycle = windows.isNotEmpty ? windows.first : store.orderingCycle;
     final closeLine = DateFormat('d MMM').format(cycle.weekEnd);
 
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -565,20 +570,22 @@ class _OrderStatusCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                open ? 'LIVE · ${cycle.title}' : '${cycle.title.isEmpty ? 'Ordering' : cycle.title} · CLOSED',
+                open
+                    ? (multi ? 'LIVE · ${windows.length} windows open' : 'LIVE · ${cycle.title}')
+                    : '${cycle.title.isEmpty ? 'Ordering' : cycle.title} · CLOSED',
                 style: t.labelMedium?.copyWith(color: Colors.white.withValues(alpha: 0.92), letterSpacing: 1.1, fontWeight: FontWeight.w700),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
-            open ? 'Order window is open' : 'Order window is closed',
+            open ? (multi ? '${windows.length} order windows open' : 'Order window is open') : 'Order window is closed',
             style: t.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
           Text(
             open
-                ? 'Closes $closeLine, 11:59 PM'
+                ? (multi ? 'Pick a window on the Order tab before it closes' : 'Closes $closeLine, 11:59 PM')
                 : "This week's ordering has closed. You'll be notified when the next window opens.",
             style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.88)),
           ),
@@ -941,8 +948,7 @@ class _AvailableItemsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final available = store.items.where((i) => i.currentQty > 0).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final available = [...store.items]..sort((a, b) => a.name.compareTo(b.name));
     if (available.isEmpty) return const SizedBox.shrink();
 
     final preview = available.take(10).toList();
@@ -968,7 +974,7 @@ class _AvailableItemsCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Available this week', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    Text('${available.length} items in stock', style: t.bodySmall),
+                    Text('${available.length} items available', style: t.bodySmall),
                   ],
                 ),
               ),
@@ -999,9 +1005,6 @@ class _AvailableItemsCard extends StatelessWidget {
                         Text(item.emoji, style: const TextStyle(fontSize: 17)),
                         const SizedBox(width: 6),
                         Text(item.name, style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                        const SizedBox(width: 6),
-                        Text(fmtQty(item.currentQty, item.unit),
-                            style: t.bodySmall?.copyWith(color: AppColors.brand, fontWeight: FontWeight.w700)),
                       ],
                     ),
                   ),
