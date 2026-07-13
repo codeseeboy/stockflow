@@ -1,6 +1,6 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:excel/excel.dart' hide Border;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -50,14 +50,45 @@ class _ImportStockScreenState extends State<ImportStockScreen> {
   }
 
   void _downloadTemplate() {
-    const csv = 'name,category,unit,quantity,reorder,emoji\n'
-        'Basmati Rice,Grains,kg,1000,300,🍚\n'
-        'Toor Dal,Pulses,kg,400,150,🫘\n'
-        'Onion,Vegetables,kg,500,150,🧅\n'
-        'Milk,Dairy,litre,400,110,🥛\n'
-        'Cooking Oil,Essentials,litre,300,80,🛢️\n';
-    downloadBytes(Uint8List.fromList(utf8.encode(csv)), 'stockflow_template.csv');
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Template downloaded')));
+    final excel = Excel.createExcel();
+    final sheet = excel['Stock'];
+    excel.setDefaultSheet('Stock');
+    // Drop the auto-created blank sheet so only 'Stock' remains.
+    if (excel.sheets.containsKey('Sheet1')) excel.delete('Sheet1');
+
+    sheet.appendRow([
+      TextCellValue('name'),
+      TextCellValue('quantity'),
+      TextCellValue('reorder'),
+      TextCellValue('category'),
+      TextCellValue('unit'),
+      TextCellValue('emoji'),
+    ]);
+    const samples = <List<Object>>[
+      ['Basmati Rice', 1000, 300, 'Grains', 'kg', '🍚'],
+      ['Toor Dal', 400, 150, 'Pulses', 'kg', '🫘'],
+      ['Onion', 500, 150, 'Vegetables', 'kg', '🧅'],
+      ['Milk', 400, 110, 'Dairy', 'litre', '🥛'],
+      ['Cooking Oil', 300, 80, 'Essentials', 'litre', '🛢️'],
+    ];
+    for (final r in samples) {
+      sheet.appendRow([
+        TextCellValue(r[0] as String),
+        IntCellValue(r[1] as int),
+        IntCellValue(r[2] as int),
+        TextCellValue(r[3] as String),
+        TextCellValue(r[4] as String),
+        TextCellValue(r[5] as String),
+      ]);
+    }
+
+    final bytes = excel.encode();
+    if (bytes != null) {
+      downloadBytes(Uint8List.fromList(bytes), 'stockflow_template.xlsx');
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Excel template downloaded — just fill the quantity column')),
+    );
   }
 
   void _apply() {
@@ -84,13 +115,13 @@ class _ImportStockScreenState extends State<ImportStockScreen> {
               children: [
                 SectionHeader(
                   title: 'Upload your stock sheet',
-                  subtitle: 'Excel (.xlsx) or CSV. Bulk-load the whole month in one go',
-                  info: 'Columns: name, category, unit, quantity, reorder, emoji (optional). '
-                      'Extra columns are ignored; column order doesn\'t matter.',
+                  subtitle: 'Download the Excel template, just fill the quantity column, upload it back',
+                  info: 'Only name + quantity are required. Leave category, unit and emoji blank and '
+                      'the app fills them in for you. Extra columns are ignored; column order doesn\'t matter.',
                   action: OutlinedButton.icon(
                     onPressed: _downloadTemplate,
                     icon: const Icon(Icons.download_rounded, size: 18),
-                    label: const Text('Template'),
+                    label: const Text('Excel template'),
                   ),
                 ),
                 const SizedBox(height: 18),
