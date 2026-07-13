@@ -112,7 +112,7 @@ class _UserRow extends StatelessWidget {
           CircleAvatar(
             radius: 22,
             backgroundColor: c.withValues(alpha: 0.16),
-            child: Text(user.name.substring(0, 1), style: TextStyle(color: c, fontWeight: FontWeight.w800)),
+            child: Text(user.name.isEmpty ? '?' : user.name[0].toUpperCase(), style: TextStyle(color: c, fontWeight: FontWeight.w800)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -127,7 +127,10 @@ class _UserRow extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 3),
-                Text('${user.phone} · ${user.unit}', style: t.bodySmall),
+                Text(
+                  [user.phone, user.unit, if (user.zone.isNotEmpty) user.zone].where((s) => s.isNotEmpty).join(' · '),
+                  style: t.bodySmall,
+                ),
               ],
             ),
           ),
@@ -156,6 +159,7 @@ class _AddUserSheetState extends State<_AddUserSheet> {
   final _phone = TextEditingController(text: '+91 ');
   final _unit = TextEditingController();
   UserRole _role = UserRole.customer;
+  String _zone = kZoneNames.first;
 
   @override
   void dispose() {
@@ -190,7 +194,20 @@ class _AddUserSheetState extends State<_AddUserSheet> {
           const SizedBox(height: 14),
           TextField(controller: _phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone (for notifications)')),
           const SizedBox(height: 14),
-          TextField(controller: _unit, decoration: const InputDecoration(labelText: 'Unit / Block', hintText: 'e.g. Block A')),
+          TextField(controller: _unit, decoration: const InputDecoration(labelText: 'Unit / Block', hintText: 'e.g. Wardroom')),
+          if (_role == UserRole.customer) ...[
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              initialValue: _zone,
+              decoration: const InputDecoration(
+                labelText: 'Ration scale (zone)',
+                helperText: 'Entitlement scale this customer draws against',
+                prefixIcon: Icon(Icons.shield_moon_outlined),
+              ),
+              items: [for (final z in kZoneNames) DropdownMenuItem(value: z, child: Text(z))],
+              onChanged: (v) => setState(() => _zone = v ?? _zone),
+            ),
+          ],
           const SizedBox(height: 22),
           SizedBox(
             width: double.infinity,
@@ -206,6 +223,7 @@ class _AddUserSheetState extends State<_AddUserSheet> {
                   role: _role,
                   phone: _phone.text.trim(),
                   unit: _unit.text.trim().isEmpty ? 'n/a' : _unit.text.trim(),
+                  zone: _role == UserRole.customer ? _zone : '',
                 );
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$name added')));
