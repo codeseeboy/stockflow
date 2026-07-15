@@ -747,52 +747,35 @@ class _DemandBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
     final fresh = cycle.type == DemandType.fresh;
     final deadline = DateFormat('EEE, d MMM').format(cycle.weekEnd);
-    final today = DateFormat('EEEE, d MMM · h:mm a').format(DateTime.now());
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [AppColors.brand, AppColors.brandDark], begin: Alignment.topLeft, end: Alignment.bottomRight),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-      ),
+    return AppCard(
+      padding: const EdgeInsets.all(14),
       child: Row(
         children: [
           Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(AppRadius.md)),
-            child: Icon(fresh ? Icons.eco_rounded : Icons.grain_rounded, color: Colors.white, size: 22),
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Icon(fresh ? Icons.eco_outlined : Icons.grain, color: scheme.onSurface, size: 20),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${cycle.type.label} ration · ${cycle.days} days',
-                    style: t.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+                Text('${cycle.type.label} ration · ${cycle.days} days', style: t.titleSmall),
                 const SizedBox(height: 2),
-                Text(today, style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
+                Text('Closes $deadline', style: t.bodySmall),
               ],
             ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(AppRadius.pill)),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.circle, size: 8, color: Color(0xFF9DF3C7)),
-                  SizedBox(width: 5),
-                  Text('Demand open', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11)),
-                ]),
-              ),
-              const SizedBox(height: 6),
-              Text('Closes $deadline', style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
-            ],
-          ),
+          const Pill('Open', color: AppColors.success),
         ],
       ),
     );

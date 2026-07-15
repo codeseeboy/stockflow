@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/app_store.dart';
-import '../../main.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../admin/admin_shell.dart';
@@ -70,19 +69,10 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final theme = context.watch<ThemeController>();
 
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: theme.isDark
-                ? [const Color(0xFF10241C), scheme.surface]
-                : [AppColors.brandWash, AppColors.bg],
-          ),
-        ),
+        color: Theme.of(context).scaffoldBackgroundColor,
         child: SafeArea(
           child: Stack(
             children: [

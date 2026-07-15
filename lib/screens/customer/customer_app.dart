@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -357,14 +356,6 @@ String _timeGreeting() {
   return 'Good evening';
 }
 
-IconData _greetIcon() {
-  final h = DateTime.now().hour;
-  if (h < 6) return Icons.bedtime_rounded;
-  if (h < 12) return Icons.wb_sunny_rounded;
-  if (h < 17) return Icons.wb_cloudy_rounded;
-  return Icons.nights_stay_rounded;
-}
-
 /// Totals per item across this customer's orders.
 Map<String, ({String name, String emoji, String unit, double qty})> _consumptionByItem(List<Order> orders) {
   final map = <String, ({String name, String emoji, String unit, double qty})>{};
@@ -472,60 +463,21 @@ class _HomeGreeting extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final dark = scheme.brightness == Brightness.dark;
     final greet = _timeGreeting();
     final dateLine = DateFormat('EEEE, d MMM').format(DateTime.now());
     final showName = name != 'there';
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark
-              ? [const Color(0xFF1A3D2E), const Color(0xFF0F1F18)]
-              : [AppColors.brandWash, scheme.surface],
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        border: Border.all(color: scheme.outline.withValues(alpha: 0.55)),
-      ),
-      child: Row(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 6, 2, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  greet,
-                  style: t.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
-                    height: 1.1,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  showName ? '$name  ·  $dateLine' : dateLine,
-                  style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 14),
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: dark ? Colors.white.withValues(alpha: 0.07) : AppColors.brand.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
-            child: Icon(_greetIcon(), color: AppColors.brand, size: 22),
-          ),
+          Text(showName ? '$greet, $name' : greet, style: t.headlineSmall),
+          const SizedBox(height: 3),
+          Text(dateLine, style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
         ],
       ),
-    ).animate().fadeIn(duration: 320.ms).slideY(begin: 0.06, curve: Curves.easeOutCubic);
+    );
   }
 }
 
@@ -543,67 +495,50 @@ class _OrderStatusCard extends StatelessWidget {
     final multi = windows.length > 1;
     final cycle = windows.isNotEmpty ? windows.first : null;
     final closeLine = cycle != null ? DateFormat('d MMM').format(cycle.weekEnd) : '';
+    final scheme = Theme.of(context).colorScheme;
 
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final colors = open
-        ? (dark ? [AppColors.brandLight, AppColors.brand] : [AppColors.brand, AppColors.brandDark])
-        : (dark ? [const Color(0xFF2A3532), const Color(0xFF1A2421)] : [const Color(0xFF6B7B75), const Color(0xFF3C4B46)]);
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        boxShadow: [BoxShadow(color: colors.first.withValues(alpha: 0.28), blurRadius: 16, offset: const Offset(0, 8))],
-      ),
+    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: 8,
-                height: 8,
+                width: 9,
+                height: 9,
                 decoration: BoxDecoration(
-                  color: open ? const Color(0xFF7CFFB2) : Colors.white54,
+                  color: open ? AppColors.success : scheme.onSurfaceVariant,
                   shape: BoxShape.circle,
-                  boxShadow: open ? [BoxShadow(color: const Color(0xFF7CFFB2).withValues(alpha: 0.6), blurRadius: 6)] : null,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   open
-                      ? (multi ? 'LIVE · ${windows.length} demands open' : 'LIVE · ${cycle!.title}')
-                      : 'DEMAND NOT STARTED',
-                  style: t.labelMedium?.copyWith(color: Colors.white.withValues(alpha: 0.92), letterSpacing: 1.1, fontWeight: FontWeight.w700),
-                  overflow: TextOverflow.ellipsis,
+                      ? (multi ? '${windows.length} demands are open' : '${cycle!.type.label} ration demand is open')
+                      : 'Demand acceptance has not started yet',
+                  style: t.titleMedium,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            open
-                ? (multi ? '${windows.length} demands are open' : '${cycle!.type.label} ration demand is open')
-                : 'Demand acceptance has not started yet',
-            style: t.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            open
-                ? (multi
-                    ? 'Pick a demand on the Order tab before it closes'
-                    : 'Covers ${cycle!.days} days · closes $closeLine, 11:59 PM')
-                : "The unit hasn't opened the demand yet. You'll be notified the moment it does — your balance below is still yours.",
-            style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.88)),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.only(left: 17),
+            child: Text(
+              open
+                  ? (multi
+                      ? 'Choose a demand on the Order tab before it closes.'
+                      : '${cycle!.title} · covers ${cycle.days} days · closes $closeLine')
+                  : 'The unit has not opened the demand yet. You will be notified when it starts. Your balance below stays with you.',
+              style: t.bodyMedium,
+            ),
           ),
           if (open) ...[
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: AppColors.brandDark),
                 onPressed: onOrderNow,
                 child: const Text('Place demand'),
               ),

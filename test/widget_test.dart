@@ -24,7 +24,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('StockFlow'), findsWidgets);
-    expect(find.text('Admin Console'), findsOneWidget);
-    expect(find.text('Customer Order'), findsOneWidget);
+    expect(find.text('Admin'), findsOneWidget);
+    expect(find.text('Customer'), findsOneWidget);
+    expect(find.text('Store staff'), findsOneWidget);
   });
 }

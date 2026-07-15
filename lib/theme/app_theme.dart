@@ -2,61 +2,62 @@ import 'package:flutter/material.dart';
 
 /// Central palette for StockFlow.
 ///
-/// Brand is a fresh emerald (food / freshness) with a warm amber accent.
-/// Deliberately NOT blue-dominant. A spread of category colours keeps the
-/// catalogue lively and easy to scan.
+/// Plain and neutral: charcoal for primary actions, white/gray surfaces, and
+/// colour only where it carries meaning (green = open/ok, amber = attention,
+/// red = problem). No gradients, no glows, nothing decorative — the content
+/// does the talking.
 class AppColors {
   AppColors._();
 
-  // Brand
-  static const brand = Color(0xFF12936A);
-  static const brandDark = Color(0xFF0B6E4F);
-  static const brandLight = Color(0xFF3FBE91);
-  static const brandWash = Color(0xFFE7F6EF);
+  // Primary — neutral charcoal (buttons, links, progress)
+  static const brand = Color(0xFF24292F);
+  static const brandDark = Color(0xFF16191D);
+  static const brandLight = Color(0xFF57606A);
+  static const brandWash = Color(0xFFF0F2F4);
 
-  // Accent
-  static const accent = Color(0xFFF2A23C);
-  static const accentWash = Color(0xFFFCEBD0);
+  // Accent — subdued gold (used sparingly: in-lieu labels, carry-over tags)
+  static const accent = Color(0xFF9C7018);
+  static const accentWash = Color(0xFFF5EEDC);
 
-  // Status
-  static const success = Color(0xFF16A34A);
-  static const warning = Color(0xFFEAA60B);
-  static const danger = Color(0xFFE5484D);
-  static const successWash = Color(0xFFE4F6EA);
-  static const warningWash = Color(0xFFFBF0D4);
-  static const dangerWash = Color(0xFFFBE6E7);
+  // Status — muted, readable
+  static const success = Color(0xFF2E7D32);
+  static const warning = Color(0xFFA36A00);
+  static const danger = Color(0xFFC03B3F);
+  static const successWash = Color(0xFFE9F3EA);
+  static const warningWash = Color(0xFFF7EFDE);
+  static const dangerWash = Color(0xFFF9E9E9);
 
-  // Light neutrals
-  static const bg = Color(0xFFF4F7F5);
+  // Light neutrals — plain grays, no colour tint
+  static const bg = Color(0xFFF4F5F7);
   static const surface = Color(0xFFFFFFFF);
-  static const surfaceMuted = Color(0xFFEFF3F1);
-  static const ink = Color(0xFF12201C);
-  static const inkSoft = Color(0xFF5E6F69);
-  static const inkFaint = Color(0xFF93A29C);
-  static const line = Color(0xFFE5ECE8);
+  static const surfaceMuted = Color(0xFFEEF0F3);
+  static const ink = Color(0xFF20262E);
+  static const inkSoft = Color(0xFF5B6570);
+  static const inkFaint = Color(0xFF97A0A9);
+  static const line = Color(0xFFE0E4E9);
 
   // Dark neutrals
-  static const dBg = Color(0xFF0D1714);
-  static const dSurface = Color(0xFF161F1C);
-  static const dSurfaceMuted = Color(0xFF1E2826);
-  static const dInk = Color(0xFFEDF2EF);
-  static const dInkSoft = Color(0xFFA0B0AA);
-  static const dLine = Color(0xFF273230);
+  static const dBg = Color(0xFF11151A);
+  static const dSurface = Color(0xFF181E25);
+  static const dSurfaceMuted = Color(0xFF20272F);
+  static const dInk = Color(0xFFE8ECF0);
+  static const dInkSoft = Color(0xFF9AA5B0);
+  static const dLine = Color(0xFF2A323C);
 
   // Dark status washes (muted tints that read on dark surfaces)
-  static const dSuccessWash = Color(0xFF1A3328);
-  static const dWarningWash = Color(0xFF3A2E14);
-  static const dDangerWash = Color(0xFF3A1E20);
-  static const dBrandWash = Color(0xFF1A3D2E);
+  static const dSuccessWash = Color(0xFF1D3020);
+  static const dWarningWash = Color(0xFF352B16);
+  static const dDangerWash = Color(0xFF381F20);
+  static const dBrandWash = Color(0xFF272E36);
 
-  // Category accents (variety = easy scanning; blue is just one of many)
-  static const cGrains = Color(0xFFD9A21B);
-  static const cPulses = Color(0xFFB06AD6);
-  static const cVeg = Color(0xFF36A85A);
-  static const cFruits = Color(0xFFE5604D);
-  static const cDairy = Color(0xFF3E86E0);
-  static const cBakery = Color(0xFFE08A3C);
-  static const cEssentials = Color(0xFF14A8A0);
+  // Category accents — muted so they read as labels, not decoration
+  static const cGrains = Color(0xFFB08514);
+  static const cPulses = Color(0xFF8A5FAB);
+  static const cVeg = Color(0xFF3B8558);
+  static const cFruits = Color(0xFFB65546);
+  static const cDairy = Color(0xFF3D6FA8);
+  static const cBakery = Color(0xFFAF6F34);
+  static const cEssentials = Color(0xFF2E8783);
 
   static const chartPalette = [
     cGrains,
@@ -69,12 +70,13 @@ class AppColors {
   ];
 }
 
+/// Small, consistent corner radii — squarer = more formal.
 class AppRadius {
   AppRadius._();
-  static const sm = 10.0;
-  static const md = 14.0;
-  static const lg = 20.0;
-  static const xl = 28.0;
+  static const sm = 6.0;
+  static const md = 8.0;
+  static const lg = 10.0;
+  static const xl = 12.0;
   static const pill = 999.0;
 }
 
@@ -108,10 +110,10 @@ class AppTheme {
       seedColor: AppColors.brand,
       brightness: Brightness.dark,
     ).copyWith(
-      primary: AppColors.brandLight,
-      onPrimary: const Color(0xFF03251A),
+      primary: const Color(0xFFCFD6DD),
+      onPrimary: const Color(0xFF16191D),
       primaryContainer: AppColors.dBrandWash,
-      onPrimaryContainer: AppColors.brandWash,
+      onPrimaryContainer: AppColors.dInk,
       secondary: AppColors.accent,
       onSecondary: const Color(0xFF2A1A06),
       secondaryContainer: const Color(0xFF3A2A12),
@@ -137,24 +139,24 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       fontFamily: 'Jakarta',
-      splashFactory: InkSparkle.splashFactory,
     );
 
     final ink = scheme.onSurface;
     final soft = isLight ? AppColors.inkSoft : AppColors.dInkSoft;
 
+    // Calm weights, slightly larger body text — easy reading for every user.
     final textTheme = base.textTheme.copyWith(
-      displaySmall: TextStyle(fontWeight: FontWeight.w800, fontSize: 30, color: ink, letterSpacing: -0.5),
-      headlineMedium: TextStyle(fontWeight: FontWeight.w800, fontSize: 26, color: ink, letterSpacing: -0.4),
-      headlineSmall: TextStyle(fontWeight: FontWeight.w700, fontSize: 22, color: ink, letterSpacing: -0.3),
-      titleLarge: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: ink, letterSpacing: -0.2),
-      titleMedium: TextStyle(fontWeight: FontWeight.w600, fontSize: 15.5, color: ink),
-      titleSmall: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: ink),
-      bodyLarge: TextStyle(fontWeight: FontWeight.w500, fontSize: 15, color: ink),
-      bodyMedium: TextStyle(fontWeight: FontWeight.w500, fontSize: 13.5, color: soft),
-      bodySmall: TextStyle(fontWeight: FontWeight.w500, fontSize: 12, color: soft),
-      labelLarge: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: ink),
-      labelMedium: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: soft),
+      displaySmall: TextStyle(fontWeight: FontWeight.w700, fontSize: 28, color: ink),
+      headlineMedium: TextStyle(fontWeight: FontWeight.w700, fontSize: 24, color: ink),
+      headlineSmall: TextStyle(fontWeight: FontWeight.w700, fontSize: 21, color: ink),
+      titleLarge: TextStyle(fontWeight: FontWeight.w600, fontSize: 18, color: ink),
+      titleMedium: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: ink),
+      titleSmall: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ink),
+      bodyLarge: TextStyle(fontWeight: FontWeight.w400, fontSize: 15, color: ink),
+      bodyMedium: TextStyle(fontWeight: FontWeight.w400, fontSize: 14, color: soft),
+      bodySmall: TextStyle(fontWeight: FontWeight.w400, fontSize: 12.5, color: soft),
+      labelLarge: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ink),
+      labelMedium: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: soft),
     );
 
     return base.copyWith(
@@ -178,31 +180,34 @@ class AppTheme {
           backgroundColor: scheme.primary,
           foregroundColor: scheme.onPrimary,
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+          minimumSize: const Size(64, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w700, fontSize: 14.5),
+          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w600, fontSize: 14.5),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: ink,
           side: BorderSide(color: scheme.outline),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          minimumSize: const Size(64, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w700, fontSize: 14.5),
+          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w600, fontSize: 14.5),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: scheme.primary,
-          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w700, fontSize: 14),
+          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w600, fontSize: 14),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+          minimumSize: const Size(64, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w700, fontSize: 14.5),
+          textStyle: const TextStyle(fontFamily: 'Jakarta', fontWeight: FontWeight.w600, fontSize: 14.5),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -225,9 +230,9 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: isLight ? AppColors.surfaceMuted : AppColors.dSurfaceMuted,
-        labelStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: ink),
-        side: BorderSide.none,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.pill)),
+        labelStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: ink),
+        side: BorderSide(color: scheme.outline),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
       navigationBarTheme: NavigationBarThemeData(

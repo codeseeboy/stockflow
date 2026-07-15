@@ -126,17 +126,9 @@ class _SideNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    const dark = Color(0xFF0F221C);
-    const dark2 = Color(0xFF122820);
     return Container(
       width: 260,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [dark, dark2],
-        ),
-      ),
+      color: const Color(0xFF1B1F24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -346,7 +338,7 @@ class _NavItem extends StatelessWidget {
             child: Row(
               children: [
                 Icon(selected ? dest.selected : dest.icon,
-                    size: 21, color: selected ? const Color(0xFF9DF3C7) : Colors.white60),
+                    size: 21, color: selected ? Colors.white : Colors.white60),
                 const SizedBox(width: 12),
                 Text(
                   dest.label,

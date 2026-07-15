@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/app_store.dart';
@@ -123,10 +122,7 @@ class _HeroScaffold extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.asset('assets/images/auth_hero.png', fit: BoxFit.cover, alignment: Alignment.topCenter)
-                        .animate()
-                        .fadeIn(duration: 700.ms, curve: Curves.easeOut)
-                        .scale(begin: const Offset(1.06, 1.06), end: const Offset(1, 1), duration: 1200.ms, curve: Curves.easeOutCubic),
+                    Image.asset('assets/images/auth_hero.png', fit: BoxFit.cover, alignment: Alignment.topCenter),
                     DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -171,19 +167,9 @@ class _HeroScaffold extends StatelessWidget {
               Expanded(
                 child: Container(
                   width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: bg,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 24, offset: const Offset(0, -8)),
-                    ],
-                  ),
-                  clipBehavior: Clip.antiAlias,
+                  color: bg,
                   child: panel,
-                )
-                    .animate()
-                    .slideY(begin: 0.04, duration: 420.ms, curve: Curves.easeOutCubic)
-                    .fadeIn(duration: 350.ms),
+                ),
               ),
             ],
           );
@@ -247,18 +233,13 @@ class _HeroBrand extends StatelessWidget {
           ),
         ),
       ],
-    ).animate().fadeIn(delay: 150.ms, duration: 500.ms).slideY(begin: 0.18, curve: Curves.easeOutCubic);
+    );
   }
 }
 
-/// Staggers a list of widgets with a soft fade + rise (ease-out).
-List<Widget> _staggered(List<Widget> children, {int fromMs = 150, int stepMs = 70}) => [
-      for (var i = 0; i < children.length; i++)
-        children[i]
-            .animate()
-            .fadeIn(delay: (fromMs + stepMs * i).ms, duration: 420.ms, curve: Curves.easeOut)
-            .slideY(begin: 0.25, delay: (fromMs + stepMs * i).ms, duration: 420.ms, curve: Curves.easeOutCubic),
-    ];
+/// Previously staggered entrance animations — now a plain passthrough.
+/// Content appears immediately; nothing moves unless it means something.
+List<Widget> _staggered(List<Widget> children, {int fromMs = 150, int stepMs = 70}) => children;
 
 // ---------------- Welcome ----------------
 
@@ -307,13 +288,13 @@ class _CustomerWelcomeState extends State<CustomerWelcome> {
           ),
           const SizedBox(height: 18),
           Text(
-            'Order supplies with clarity and control',
-            style: t.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800, height: 1.12, shadows: [
+            'Place your ration demand and see your balance',
+            style: t.headlineSmall?.copyWith(color: Colors.white, height: 1.15, shadows: [
               const Shadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 2)),
             ]),
           ),
         ],
-      ).animate().fadeIn(delay: 200.ms, duration: 500.ms).slideX(begin: -0.06, curve: Curves.easeOutCubic),
+      ),
       panel: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
         child: Center(
@@ -594,10 +575,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                 ]),
                 if (_error != null) ...[
                   const SizedBox(height: 14),
-                  _ErrorBox(_error!)
-                      .animate()
-                      .fadeIn(duration: 250.ms)
-                      .shake(hz: 4, offset: const Offset(3, 0), duration: 400.ms),
+                  _ErrorBox(_error!),
                 ],
                 const SizedBox(height: 22),
                 ..._staggered(fromMs: 360, [
@@ -760,10 +738,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                 ]),
                 if (_error != null) ...[
                   const SizedBox(height: 14),
-                  _ErrorBox(_error!)
-                      .animate()
-                      .fadeIn(duration: 250.ms)
-                      .shake(hz: 4, offset: const Offset(3, 0), duration: 400.ms),
+                  _ErrorBox(_error!),
                 ],
                 const SizedBox(height: 22),
                 ..._staggered(fromMs: 500, [

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -75,108 +74,75 @@ class _LiveOrderBanner extends StatelessWidget {
     final deadline = DateFormat('EEE, d MMM').format(cycle.weekEnd);
     final orderCount = store.orders.where((o) => o.cycleId == cycle.id).length;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF0D7A52), Color(0xFF065F46)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        boxShadow: [BoxShadow(color: const Color(0xFF0D7A52).withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(0, 10))],
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(color: Color(0xFF7CFFB2), shape: BoxShape.circle),
-                    ),
-                    const SizedBox(width: 6),
-                    Text('LIVE NOW', style: t.labelMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800, letterSpacing: 1.2)),
-                  ],
-                ),
+                width: 9,
+                height: 9,
+                decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle),
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(AppRadius.pill)),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.receipt_long_rounded, color: Colors.white, size: 14),
-                    const SizedBox(width: 5),
-                    Text('$orderCount orders', style: t.labelMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
-                  ],
-                ),
-              ),
+              const SizedBox(width: 8),
+              Expanded(child: Text('${cycle.title} is open', style: t.titleMedium)),
+              Pill('$orderCount orders', color: AppColors.success, icon: Icons.receipt_long_outlined),
             ],
           ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 17),
+            child: Text('Customers can place their demand until $deadline.', style: t.bodyMedium),
+          ),
           const SizedBox(height: 14),
-          Text('${cycle.title} — order link is open', style: t.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          Text('Customers can order until $deadline · closes 11:59 PM', style: t.bodyMedium?.copyWith(color: Colors.white.withValues(alpha: 0.88))),
-          const SizedBox(height: 16),
           Container(
-            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+            padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.2),
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: Row(
               children: [
-                const Icon(Icons.link_rounded, color: Colors.white, size: 20),
+                Icon(Icons.link, size: 18, color: scheme.onSurfaceVariant),
                 const SizedBox(width: 10),
-                Expanded(child: Text(cycle.link, style: t.bodyMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                Expanded(child: Text(cycle.link, style: t.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 IconButton(
                   tooltip: 'Copy link',
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: cycle.link));
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order link copied')));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied')));
                   },
-                  icon: const Icon(Icons.copy_rounded, color: Colors.white),
+                  icon: const Icon(Icons.copy_outlined, size: 18),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF065F46)),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
             onPressed: () async {
-              const body = 'Place your weekly order before the window closes.';
+              const body = 'Place your demand before the window closes.';
               final result = await showNotifyCustomersSheet(
                 context,
-                title: '${cycle.title} order link is open',
+                title: '${cycle.title} is open',
                 body: body,
               );
               if (result != null && context.mounted) {
                 await showBroadcastDeliveryDialog(
                   context,
                   result,
-                  message: '${cycle.title} order link is open. $body',
-                  subject: 'StockFlow — ${cycle.title} order window is open',
+                  message: '${cycle.title} is open. $body',
+                  subject: 'StockFlow — ${cycle.title} is open',
                 );
               }
             },
-            icon: const Icon(Icons.campaign_rounded, size: 18),
-            label: const Text('Notify all customers'),
+            icon: const Icon(Icons.campaign_outlined, size: 18),
+            label: const Text('Notify customers'),
           ),
         ],
       ),
-    ).animate().fadeIn(duration: 300.ms).slideY(begin: 0.05);
+    );
   }
 }
 

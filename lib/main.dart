@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 
 import 'config/supabase_config.dart';
@@ -155,9 +154,9 @@ class _SplashScreenState extends State<SplashScreen> {
       await Future<void>.delayed(const Duration(milliseconds: 60));
       if (!mounted) return;
     }
-    // Let the splash breathe so the transition feels intentional, not glitchy.
+    // A short minimum so the transition doesn't flash.
     final elapsed = DateTime.now().difference(started);
-    const minSplash = Duration(milliseconds: 1500);
+    const minSplash = Duration(milliseconds: 500);
     if (elapsed < minSplash) await Future<void>.delayed(minSplash - elapsed);
     if (!mounted) return;
 
@@ -187,129 +186,29 @@ class _SplashScreenState extends State<SplashScreen> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final dark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: dark ? [const Color(0xFF10241C), scheme.surface] : [AppColors.brandWash, AppColors.bg],
-          ),
-        ),
-        child: SafeArea(
-          child: Stack(
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Positioned(
-                top: -70,
-                right: -60,
-                child: _SplashGlow(color: scheme.primary.withValues(alpha: dark ? 0.18 : 0.16), size: 180),
+              const BrandMark(size: 64),
+              const SizedBox(height: 18),
+              Text('StockFlow', textAlign: TextAlign.center, style: t.headlineMedium),
+              const SizedBox(height: 6),
+              Text(
+                'Ration inventory and demand system',
+                textAlign: TextAlign.center,
+                style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
               ),
-              Positioned(
-                left: -80,
-                bottom: 70,
-                child: _SplashGlow(color: AppColors.accent.withValues(alpha: dark ? 0.12 : 0.18), size: 210),
-              ),
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 340),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const BrandMark(size: 78)
-                            .animate()
-                            .fadeIn(duration: 280.ms)
-                            .scale(begin: const Offset(0.74, 0.74), duration: 520.ms, curve: Curves.easeOutBack),
-                        const SizedBox(height: 22),
-                        Text('StockFlow', textAlign: TextAlign.center, style: t.displaySmall?.copyWith(letterSpacing: -0.8))
-                            .animate()
-                            .fadeIn(delay: 160.ms, duration: 380.ms)
-                            .slideY(begin: 0.12, duration: 380.ms, curve: Curves.easeOutCubic),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Inventory & weekly ordering',
-                          textAlign: TextAlign.center,
-                          style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-                        ).animate().fadeIn(delay: 280.ms, duration: 360.ms),
-                        const SizedBox(height: 34),
-                        _SplashProgress(color: scheme.primary)
-                            .animate()
-                            .fadeIn(delay: 420.ms, duration: 300.ms)
-                            .slideY(begin: 0.18, delay: 420.ms, duration: 360.ms, curve: Curves.easeOutCubic),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 28),
-                  child: Text(
-                    'Preparing your store',
-                    style: t.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
-                  ).animate().fadeIn(delay: 600.ms, duration: 350.ms),
-                ),
+              const SizedBox(height: 32),
+              const SizedBox(
+                width: 140,
+                child: LinearProgressIndicator(minHeight: 4),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SplashGlow extends StatelessWidget {
-  final Color color;
-  final double size;
-
-  const _SplashGlow({required this.color, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(colors: [color, color.withValues(alpha: 0)]),
-      ),
-    );
-  }
-}
-
-class _SplashProgress extends StatelessWidget {
-  final Color color;
-
-  const _SplashProgress({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: 132,
-      height: 6,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: scheme.surface.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: scheme.outline.withValues(alpha: 0.7)),
-      ),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: FractionallySizedBox(
-          widthFactor: 0.42,
-          child: Container(
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-            ),
-          )
-              .animate(onPlay: (controller) => controller.repeat())
-              .slideX(begin: -1.2, end: 2.8, duration: 1200.ms, curve: Curves.easeInOutCubic),
         ),
       ),
     );

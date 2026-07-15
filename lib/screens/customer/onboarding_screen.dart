@@ -75,44 +75,31 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final dark = Theme.of(context).brightness == Brightness.dark;
-
-    final washes = dark
-        ? const [Color(0xFF10241C), Color(0xFF241D10), Color(0xFF101C24)]
-        : const [AppColors.brandWash, AppColors.accentWash, Color(0xFFE3EEFA)];
 
     final pages = [
       _PageData(
-        title: 'See live stock before you order',
+        title: 'Your balance, always visible',
         subtitle:
-            'Quantities in the central store update in real time, so you always know what\'s available before the window closes.',
+            'See your monthly entitlement for each category and how much is still left with you — even if you were away.',
         scene: (active) => _StockScene(active: active),
       ),
       _PageData(
-        title: 'Your weekly order, done in minutes',
+        title: 'Place your demand in minutes',
         subtitle:
-            'Add items, set quantities, submit. Your unit\'s details are remembered — no calls and no paperwork.',
+            'When the unit opens a demand, pick items and quantities within your balance and submit. Your details are remembered.',
         scene: (active) => _OrderScene(active: active),
       ),
       _PageData(
-        title: 'Track it to your doorstep',
+        title: 'Track every demand',
         subtitle:
-            'Follow every order from pending to delivered, with status updates from the store team as it moves.',
+            'Follow each demand from pending to delivered, with status updates from the store team.',
         scene: (active) => _TrackScene(active: active),
       ),
     ];
 
     return Scaffold(
-      body: AnimatedContainer(
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeOut,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [washes[_page], Theme.of(context).scaffoldBackgroundColor],
-          ),
-        ),
+      body: Container(
+        color: Theme.of(context).scaffoldBackgroundColor,
         child: SafeArea(
           child: Column(
             children: [

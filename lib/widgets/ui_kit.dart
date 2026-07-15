@@ -12,7 +12,7 @@ String fmtNum(num v) {
 
 String fmtQty(double qty, String unit) => '${fmtNum(qty)} $unit';
 
-/// Soft rounded surface used everywhere.
+/// Plain bordered surface used everywhere — flat, no shadow.
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -22,7 +22,7 @@ class AppCard extends StatelessWidget {
   const AppCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(18),
+    this.padding = const EdgeInsets.all(16),
     this.onTap,
     this.color,
     this.radius = AppRadius.lg,
@@ -31,28 +31,19 @@ class AppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isLight = scheme.brightness == Brightness.light;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(radius),
-        boxShadow: isLight
-            ? [BoxShadow(color: const Color(0xFF12201C).withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 6))]
-            : [BoxShadow(color: Colors.black.withValues(alpha: 0.28), blurRadius: 14, offset: const Offset(0, 5))],
-      ),
-      child: Material(
-        color: color ?? scheme.surface,
-        borderRadius: BorderRadius.circular(radius),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Ink(
-            padding: padding,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(radius),
-              border: Border.all(color: scheme.outline),
-            ),
-            child: child,
+    return Material(
+      color: color ?? scheme.surface,
+      borderRadius: BorderRadius.circular(radius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Ink(
+          padding: padding,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: scheme.outline),
           ),
+          child: child,
         ),
       ),
     );
@@ -261,6 +252,7 @@ class StatTile extends StatelessWidget {
   }
 }
 
+/// Quiet label tag — a small dot of colour, plain text, thin border.
 class Pill extends StatelessWidget {
   final String text;
   final Color color;
@@ -269,14 +261,23 @@ class Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(AppRadius.pill)),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border.all(color: scheme.outline),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (icon != null) ...[Icon(icon, size: 13, color: color), const SizedBox(width: 5)],
-          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
+          if (icon != null) ...[Icon(icon, size: 12, color: color), const SizedBox(width: 5)]
+          else ...[
+            Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+          ],
+          Text(text, style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600, fontSize: 12)),
         ],
       ),
     );
