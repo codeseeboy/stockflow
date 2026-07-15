@@ -407,10 +407,10 @@ class DemandNotStarted extends StatelessWidget {
             child: const Icon(Icons.hourglass_empty_rounded, size: 36, color: AppColors.brand),
           ),
           const SizedBox(height: 18),
-          Text('Demand acceptance has not started yet', style: t.titleLarge, textAlign: TextAlign.center),
+          Text('Demand not started yet', style: t.titleLarge, textAlign: TextAlign.center),
           const SizedBox(height: 6),
           Text(
-            'The unit has not opened the demand. You’ll be notified the moment it starts — then this page will let you place your demand.',
+            'You will be notified when the unit opens it.',
             textAlign: TextAlign.center,
             style: t.bodyMedium,
           ),
@@ -473,10 +473,10 @@ class _AlreadyOrderedState extends StatelessWidget {
               child: const Icon(Icons.verified_rounded, size: 38, color: AppColors.success),
             ),
             const SizedBox(height: 18),
-            Text("You've placed your demand for ${cycle.title}", style: t.titleLarge, textAlign: TextAlign.center),
+            Text('Demand placed for ${cycle.title}', style: t.titleLarge, textAlign: TextAlign.center),
             const SizedBox(height: 6),
             Text(
-              'This demand is now closed for you. Below is what is still due to you for ${cycle.month.label} — it carries into the next demand.',
+              'Your remaining balance for ${cycle.month.label} is below.',
               textAlign: TextAlign.center,
               style: t.bodyMedium,
             ),
@@ -627,9 +627,7 @@ class BalanceSummaryCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  zoneLabel.isEmpty
-                      ? 'Balance left with you · ${month.label}'
-                      : 'Balance left with you · ${month.label} · $zoneLabel',
+                  'Balance · ${month.label}${zoneLabel.isEmpty ? '' : ' · $zoneLabel'}',
                   style: t.titleSmall,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -655,15 +653,9 @@ class BalanceSummaryCard extends StatelessWidget {
           Wrap(spacing: 8, runSpacing: 8, children: [
             Pill('${fmtNum(remaining)} left', color: AppColors.brand, icon: Icons.savings_rounded),
             if (carried > 0)
-              Pill('${fmtNum(carried)} carried from ${month.previous.shortLabel}',
-                  color: AppColors.accent, icon: Icons.move_up_rounded),
-            if (inCart > 0) Pill('${fmtNum(inCart)} in this demand', color: AppColors.cDairy, icon: Icons.shopping_basket_rounded),
+              Pill('+${fmtNum(carried)} carried', color: AppColors.accent, icon: Icons.move_up_rounded),
+            if (inCart > 0) Pill('${fmtNum(inCart)} in cart', color: AppColors.cDairy, icon: Icons.shopping_basket_rounded),
           ]),
-          const SizedBox(height: 8),
-          Text(
-            'This is your own entitlement — what is still due to you this month, not the store’s stock.',
-            style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-          ),
         ],
       ),
     );
@@ -690,7 +682,7 @@ class CategoryBalanceBar extends StatelessWidget {
     final color = empty ? AppColors.warning : category.color;
 
     final detail = <String>[
-      '${fmtNum(balance.allowance)} for ${balance.unit == 'nos' ? 'the month' : 'the month'}',
+      '${fmtNum(balance.allowance)} this month',
       if (balance.carriedIn > 0) '+${fmtNum(balance.carriedIn)} carried',
       if (balance.consumed > 0) '−${fmtNum(balance.consumed)} taken',
     ].join(' · ');

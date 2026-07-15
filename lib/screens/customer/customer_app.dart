@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -15,10 +14,11 @@ import '../../utils/customer_orders.dart';
 import '../../utils/notification_service.dart';
 import '../../widgets/ui_kit.dart';
 import '../entry_screen.dart';
+import 'balance_screen.dart';
 import 'customer_auth.dart';
 import 'order_form.dart';
 
-/// The customer-facing app: Home, Order, My Orders, Profile.
+/// The customer-facing app: Home, Order, Balance, Orders, Profile.
 class CustomerShell extends StatefulWidget {
   final String name;
   final String phone;
@@ -118,8 +118,15 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      _HomeTab(name: widget.name, phone: widget.phone, designation: widget.designation, onOrderNow: () => setState(() => _index = 1)),
+      _HomeTab(
+        name: widget.name,
+        phone: widget.phone,
+        designation: widget.designation,
+        onOrderNow: () => setState(() => _index = 1),
+        onOpenBalance: () => setState(() => _index = 2),
+      ),
       OrderForm(name: widget.name, phone: widget.phone, designation: widget.designation),
+      BalanceScreen(name: widget.name, phone: widget.phone, designation: widget.designation),
       _MyOrdersTab(name: widget.name, phone: widget.phone, onOrderNow: () => setState(() => _index = 1)),
       _ProfileTab(name: widget.name, phone: widget.phone, email: widget.email, address: widget.address),
     ];
@@ -140,7 +147,8 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.add_shopping_cart_outlined), selectedIcon: Icon(Icons.add_shopping_cart_rounded), label: 'Order'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long_rounded), label: 'My Orders'),
+          NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), selectedIcon: Icon(Icons.account_balance_wallet_rounded), label: 'Balance'),
+          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long_rounded), label: 'Orders'),
           NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded), label: 'Profile'),
         ],
       ),
@@ -356,65 +364,26 @@ String _timeGreeting() {
   return 'Good evening';
 }
 
-/// Totals per item across this customer's orders.
-Map<String, ({String name, String emoji, String unit, double qty})> _consumptionByItem(List<Order> orders) {
-  final map = <String, ({String name, String emoji, String unit, double qty})>{};
-  for (final o in orders) {
-    for (final l in o.lines) {
-      final prev = map[l.itemId];
-      map[l.itemId] = (
-        name: l.name,
-        emoji: l.emoji,
-        unit: l.unit,
-        qty: (prev?.qty ?? 0) + l.qty,
-      );
-    }
-  }
-  return map;
-}
-
-Map<String, double> _categoryTotals(List<Order> orders, AppStore store) {
-  final map = <String, double>{};
-  for (final o in orders) {
-    for (final l in o.lines) {
-      final cat = store.items.where((i) => i.id == l.itemId).map((i) => i.category).firstOrNull ?? 'Other';
-      map[cat] = (map[cat] ?? 0) + l.qty;
-    }
-  }
-  return map;
-}
-
-double _itemQtyInCycle(List<Order> orders, String cycleId, String itemId) {
-  var total = 0.0;
-  for (final o in orders.where((x) => x.cycleId == cycleId)) {
-    for (final l in o.lines) {
-      if (l.itemId == itemId) total += l.qty;
-    }
-  }
-  return total;
-}
-
-(String currentId, String? previousId) _recentCyclePair(AppStore store) {
-  final sorted = [...store.cycles]..sort((a, b) => b.weekStart.compareTo(a.weekStart));
-  if (sorted.isEmpty) return ('', null);
-  return (sorted.first.id, sorted.length > 1 ? sorted[1].id : null);
-}
-
-// ---------------- Home ----------------
-
+/// Home keeps to three things: is a demand open, how much balance is left,
+/// and the last order. Everything else lives in its own tab.
 class _HomeTab extends StatelessWidget {
   final String name;
   final String phone;
   final String designation;
   final VoidCallback onOrderNow;
-  const _HomeTab({required this.name, required this.phone, required this.designation, required this.onOrderNow});
+  final VoidCallback onOpenBalance;
+  const _HomeTab({
+    required this.name,
+    required this.phone,
+    required this.designation,
+    required this.onOrderNow,
+    required this.onOpenBalance,
+  });
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final canOrder = store.canPlaceOrders;
     final displayName = _homeDisplayName(name);
-    final accountSince = SavedProfile.load()?.accountCreatedAt;
     final myOrders = customerOrdersFor(store, name, phone);
     final lastOrder = myOrders.isNotEmpty ? myOrders.first : null;
 
@@ -427,29 +396,100 @@ class _HomeTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _HomeGreeting(name: displayName),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
-              const SizedBox(height: 14),
-              _MyBalanceCard(store: store, name: name, phone: phone, designation: designation),
-              const SizedBox(height: 14),
-              _AvailableItemsCard(store: store, designation: designation, onOrderNow: onOrderNow),
-              const SizedBox(height: 14),
-              _CustomerActivityCard(store: store, orders: myOrders, accountSince: accountSince),
-              if (myOrders.isEmpty) ...[
-                const SizedBox(height: 14),
-                const _HowToOrderCard(),
-              ],
-              if (canOrder && myOrders.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                _ReorderShortcuts(orders: myOrders, onOrderNow: onOrderNow),
-              ],
+              const SizedBox(height: 12),
+              _BalanceSnapshot(store: store, name: name, phone: phone, designation: designation, onOpen: onOpenBalance),
               if (lastOrder != null) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
                 _LastOrderStrip(order: lastOrder),
               ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Compact balance teaser: the headline figure and a tap-through to the
+/// Balance tab where the full breakdown lives.
+class _BalanceSnapshot extends StatelessWidget {
+  final AppStore store;
+  final String name;
+  final String phone;
+  final String designation;
+  final VoidCallback onOpen;
+  const _BalanceSnapshot({
+    required this.store,
+    required this.name,
+    required this.phone,
+    required this.designation,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final month = store.currentMonth;
+    final balances = store
+        .balancesFor(name: name, phone: phone, zone: designation, month: month)
+        .where((b) => b.total > 0)
+        .toList();
+    if (balances.isEmpty) return const SizedBox.shrink();
+
+    final remaining = balances.fold<double>(0, (s, b) => s + b.remaining);
+    final total = balances.fold<double>(0, (s, b) => s + b.total);
+    final ratio = total <= 0 ? 0.0 : (remaining / total).clamp(0.0, 1.0);
+
+    return AppCard(
+      onTap: onOpen,
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppColors.brand.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: const Icon(Icons.account_balance_wallet_rounded, color: AppColors.brand, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Balance · ${month.shortLabel}', style: t.bodySmall),
+                const SizedBox(height: 2),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(fmtNum(remaining), style: t.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: AppColors.brandDark)),
+                    const SizedBox(width: 6),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 1),
+                      child: Text('of ${fmtNum(total)} left', style: t.bodySmall),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: ratio,
+                    minHeight: 6,
+                    color: AppColors.brand,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+        ],
       ),
     );
   }
@@ -496,43 +536,61 @@ class _OrderStatusCard extends StatelessWidget {
     final cycle = windows.isNotEmpty ? windows.first : null;
     final closeLine = cycle != null ? DateFormat('d MMM').format(cycle.weekEnd) : '';
     final scheme = Theme.of(context).colorScheme;
+    final dark = scheme.brightness == Brightness.dark;
 
-    return AppCard(
+    final washOpen = dark ? AppColors.dSuccessWash : AppColors.successWash;
+    final fresh = cycle?.type == DemandType.fresh;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: open ? washOpen : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: Border.all(
+          color: open ? AppColors.success.withValues(alpha: 0.4) : scheme.outline,
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: 9,
-                height: 9,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
+                  color: open ? AppColors.success.withValues(alpha: 0.16) : scheme.outline.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Icon(
+                  open ? (fresh ? Icons.eco_rounded : Icons.grain_rounded) : Icons.lock_clock_rounded,
                   color: open ? AppColors.success : scheme.onSurfaceVariant,
-                  shape: BoxShape.circle,
+                  size: 24,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 14),
               Expanded(
-                child: Text(
-                  open
-                      ? (multi ? '${windows.length} demands are open' : '${cycle!.type.label} ration demand is open')
-                      : 'Demand acceptance has not started yet',
-                  style: t.titleMedium,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      open
+                          ? (multi ? '${windows.length} demands open' : '${cycle!.type.label} demand open')
+                          : 'Demand not started',
+                      style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      open
+                          ? (multi ? 'Pick one on the Order tab' : '${cycle!.days} days · closes $closeLine')
+                          : 'You will be notified when it opens',
+                      style: t.bodySmall,
+                    ),
+                  ],
                 ),
               ),
+              Pill(open ? 'OPEN' : 'CLOSED', color: open ? AppColors.success : scheme.onSurfaceVariant),
             ],
-          ),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.only(left: 17),
-            child: Text(
-              open
-                  ? (multi
-                      ? 'Choose a demand on the Order tab before it closes.'
-                      : '${cycle!.title} · covers ${cycle.days} days · closes $closeLine')
-                  : 'The unit has not opened the demand yet. You will be notified when it starts. Your balance below stays with you.',
-              style: t.bodyMedium,
-            ),
           ),
           if (open) ...[
             const SizedBox(height: 14),
@@ -549,373 +607,6 @@ class _OrderStatusCard extends StatelessWidget {
     );
   }
 }
-
-/// **What is still due to the customer this month** — the balance, per category.
-///
-/// This is deliberately on the home page and not gated behind an open demand:
-/// someone who was away on leave and comes back in the fourth week must be able
-/// to see the quantity still balanced with them. Because they ordered nothing,
-/// their consumed is zero and they simply see their entitlement in full.
-class _MyBalanceCard extends StatelessWidget {
-  final AppStore store;
-  final String name;
-  final String phone;
-  final String designation;
-  const _MyBalanceCard({required this.store, required this.name, required this.phone, required this.designation});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-
-    // Show the month the open demand spends from; otherwise the current month.
-    final open = store.openCyclesFor(designation);
-    final month = open.isNotEmpty ? open.first.month : store.currentMonth;
-
-    final all = store.balancesFor(name: name, phone: phone, zone: designation, month: month);
-    final balances = all.where((b) => b.total > 0).toList()
-      ..sort((a, b) => b.remaining.compareTo(a.remaining));
-    if (balances.isEmpty) return const SizedBox.shrink();
-
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.account_balance_wallet_rounded, size: 20, color: scheme.primary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Balance left with you', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    Text('Your ${month.label} entitlement', style: t.bodySmall),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          BalanceSummaryCard(month: month, balances: balances, zoneLabel: designation),
-          const SizedBox(height: 14),
-          ...balances.map((b) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: CategoryBalanceBar(category: categoryOf(b.category), balance: b),
-              )),
-        ],
-      ),
-    );
-  }
-}
-
-/// Customer ordering activity — bar pillars, categories, and week-over-week trends.
-class _CustomerActivityCard extends StatelessWidget {
-  final AppStore store;
-  final List<Order> orders;
-  final DateTime? accountSince;
-  const _CustomerActivityCard({required this.store, required this.orders, this.accountSince});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-    final byItem = _consumptionByItem(orders);
-    final itemEntries = byItem.entries.toList()..sort((a, b) => b.value.qty.compareTo(a.value.qty));
-    final entries = itemEntries.map((e) => e.value).toList();
-    final totalQty = entries.fold<double>(0, (s, e) => s + e.qty);
-    final sinceLine = accountSince != null ? 'Since ${DateFormat('d MMM yyyy').format(accountSince!)}' : 'Since account created';
-    final (currentCycle, previousCycle) = _recentCyclePair(store);
-    final categories = _categoryTotals(orders, store);
-    final catEntries = categories.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-    final top = entries.take(5).toList();
-    final maxY = top.fold<double>(1, (m, e) => e.qty > m ? e.qty : m) * 1.15;
-
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.insights_rounded, size: 20, color: scheme.primary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Your ordering activity', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    Text(sinceLine, style: t.bodySmall),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (orders.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text('Place your first order to see what you buy most.', style: t.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
-            )
-          else ...[
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                _ActivityStat(value: '${orders.length}', label: orders.length == 1 ? 'order' : 'orders'),
-                _ActivityStat(value: '${entries.length}', label: entries.length == 1 ? 'item' : 'items'),
-                _ActivityStat(value: fmtNum(totalQty), label: 'total qty'),
-              ],
-            ),
-            if (top.isNotEmpty) ...[
-              const SizedBox(height: 18),
-              Text('Top items ordered', style: t.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 168,
-                child: BarChart(
-                  BarChartData(
-                    alignment: BarChartAlignment.spaceAround,
-                    maxY: maxY,
-                    barTouchData: BarTouchData(
-                      touchTooltipData: BarTouchTooltipData(
-                        getTooltipItem: (g, gi, rod, ri) => BarTooltipItem(
-                          fmtNum(rod.toY),
-                          const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12),
-                        ),
-                      ),
-                    ),
-                    titlesData: FlTitlesData(
-                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: 28,
-                          getTitlesWidget: (v, m) => Text(fmtNum(v), style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
-                        ),
-                      ),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: 30,
-                          getTitlesWidget: (v, m) {
-                            final i = v.toInt();
-                            if (i < 0 || i >= top.length) return const SizedBox.shrink();
-                            final label = top[i].emoji;
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(label, style: const TextStyle(fontSize: 16)),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: maxY / 4,
-                      getDrawingHorizontalLine: (v) => FlLine(color: scheme.outline.withValues(alpha: 0.35), strokeWidth: 1),
-                    ),
-                    borderData: FlBorderData(show: false),
-                    barGroups: [
-                      for (var i = 0; i < top.length; i++)
-                        BarChartGroupData(
-                          x: i,
-                          barRods: [
-                            BarChartRodData(
-                              toY: top[i].qty,
-                              color: AppColors.brand,
-                              width: 22,
-                              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            if (catEntries.isNotEmpty) ...[
-              const SizedBox(height: 18),
-              Text('By category', style: t.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 10),
-              ...catEntries.take(5).map((e) {
-                final cat = categoryOf(e.key);
-                final share = (e.value / catEntries.first.value).clamp(0.08, 1.0);
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    children: [
-                      Icon(cat.icon, size: 16, color: cat.color),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(e.key, style: t.bodyMedium)),
-                      Text(fmtNum(e.value), style: t.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 72,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(value: share, minHeight: 6, color: cat.color, backgroundColor: scheme.surfaceContainerHighest),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-            ],
-            const SizedBox(height: 6),
-            Text('What you buy more', style: t.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 10),
-            ...itemEntries.take(8).map((kv) {
-              final e = kv.value;
-              final itemId = kv.key;
-              final nowQty = currentCycle.isNotEmpty ? _itemQtyInCycle(orders, currentCycle, itemId) : e.qty;
-              final prevQty = previousCycle != null ? _itemQtyInCycle(orders, previousCycle, itemId) : 0.0;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  children: [
-                    Text(e.emoji, style: const TextStyle(fontSize: 18)),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text(e.name, style: t.titleSmall, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    _TrendBadge(current: nowQty, previous: prevQty),
-                    const SizedBox(width: 10),
-                    Text(fmtQty(e.qty, e.unit), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                  ],
-                ),
-              );
-            }),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ActivityStat extends StatelessWidget {
-  final String value;
-  final String label;
-  const _ActivityStat({required this.value, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(value, style: t.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: scheme.primary)),
-          Text(label, style: t.bodySmall),
-        ],
-      ),
-    );
-  }
-}
-
-class _TrendBadge extends StatelessWidget {
-  final double current;
-  final double previous;
-  const _TrendBadge({required this.current, required this.previous});
-
-  @override
-  Widget build(BuildContext context) {
-    if (previous <= 0 && current <= 0) return const SizedBox.shrink();
-    final up = current >= previous;
-    final color = up ? AppColors.success : AppColors.danger;
-    final icon = up ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded;
-    String label;
-    if (previous <= 0) {
-      label = 'new';
-    } else {
-      final pct = ((current - previous) / previous * 100).abs();
-      label = '${pct.round()}%';
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 2),
-          Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
-        ],
-      ),
-    );
-  }
-}
-
-/// Shortcuts to re-order items this customer buys most.
-class _ReorderShortcuts extends StatelessWidget {
-  final List<Order> orders;
-  final VoidCallback onOrderNow;
-  const _ReorderShortcuts({required this.orders, required this.onOrderNow});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final top = _consumptionByItem(orders).values.toList()..sort((a, b) => b.qty.compareTo(a.qty));
-    final picks = top.take(4).toList();
-    if (picks.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Order again', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 10),
-        ...picks.map((e) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: AppCard(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                onTap: onOrderNow,
-                child: Row(
-                  children: [
-                    Text(e.emoji, style: const TextStyle(fontSize: 28)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(e.name, style: t.titleSmall),
-                          Text('You ordered ${fmtQty(e.qty, e.unit)} total', style: t.bodySmall),
-                        ],
-                      ),
-                    ),
-                    Icon(Icons.add_circle_outline_rounded, color: Theme.of(context).colorScheme.primary, size: 22),
-                  ],
-                ),
-              ),
-            )),
-      ],
-    );
-  }
-}
-
 
 class _LastOrderStrip extends StatelessWidget {
   final Order order;
@@ -944,196 +635,6 @@ class _LastOrderStrip extends StatelessWidget {
           Pill(orderStatusLabel(order.status), color: orderStatusColor(order.status)),
         ],
       ),
-    );
-  }
-}
-
-// ---------------- Available items ----------------
-
-class _AvailableItemsCard extends StatelessWidget {
-  final AppStore store;
-  final String designation;
-  final VoidCallback onOrderNow;
-  const _AvailableItemsCard({required this.store, required this.designation, required this.onOrderNow});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-
-    // Only what the unit has actually added to the open demand — the customer
-    // never sees items that aren't on the current demand list.
-    final open = store.openCyclesFor(designation);
-    if (open.isEmpty) return const SizedBox.shrink();
-    final available = [for (final c in open) ...store.itemsForCycle(c)]
-        .fold<Map<String, Item>>({}, (m, i) => m..putIfAbsent(i.id, () => i))
-        .values
-        .toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
-    if (available.isEmpty) return const SizedBox.shrink();
-
-    final preview = available.take(10).toList();
-
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(Icons.inventory_2_rounded, size: 18, color: scheme.primary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Available this week', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    Text('${available.length} items available', style: t.bodySmall),
-                  ],
-                ),
-              ),
-              if (store.canPlaceOrders)
-                TextButton(
-                  onPressed: onOrderNow,
-                  child: const Text('Order now'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final item in preview)
-                  Container(
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                      border: Border.all(color: scheme.outline.withValues(alpha: 0.45)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(item.emoji, style: const TextStyle(fontSize: 17)),
-                        const SizedBox(width: 6),
-                        Text(item.name, style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                if (available.length > 10)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.brandWash,
-                        borderRadius: BorderRadius.circular(AppRadius.md),
-                      ),
-                      child: Text('+${available.length - 10} more',
-                          style: t.bodySmall?.copyWith(color: AppColors.brand, fontWeight: FontWeight.w700)),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------- How to order ----------------
-
-class _HowToOrderCard extends StatelessWidget {
-  const _HowToOrderCard();
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return AppCard(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('How ordering works', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 14),
-          _OrderStep(
-            step: 1,
-            icon: Icons.event_rounded,
-            title: 'Order window opens',
-            subtitle: 'A new order link is published each week',
-            color: AppColors.brand,
-          ),
-          _OrderStep(
-            step: 2,
-            icon: Icons.shopping_cart_rounded,
-            title: 'Pick your items',
-            subtitle: 'Browse stock and set quantities for your unit',
-            color: AppColors.accent,
-          ),
-          _OrderStep(
-            step: 3,
-            icon: Icons.check_circle_rounded,
-            title: 'Review and confirm',
-            subtitle: 'Submit before the deadline — done',
-            color: AppColors.success,
-            last: true,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OrderStep extends StatelessWidget {
-  final int step;
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Color color;
-  final bool last;
-  const _OrderStep({required this.step, required this.icon, required this.title, required this.subtitle, required this.color, this.last = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(AppRadius.sm)),
-            child: Icon(icon, size: 18, color: color),
-          ),
-          if (!last)
-            Container(width: 2, height: 28, color: scheme.outline.withValues(alpha: 0.4)),
-        ]),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(bottom: last ? 0 : 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: t.titleSmall),
-                const SizedBox(height: 2),
-                Text(subtitle, style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

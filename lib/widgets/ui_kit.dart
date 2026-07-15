@@ -252,7 +252,7 @@ class StatTile extends StatelessWidget {
   }
 }
 
-/// Quiet label tag — a small dot of colour, plain text, thin border.
+/// Compact label tag — soft colour wash, coloured text.
 class Pill extends StatelessWidget {
   final String text;
   final Color color;
@@ -261,23 +261,17 @@ class Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border.all(color: scheme.outline),
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (icon != null) ...[Icon(icon, size: 12, color: color), const SizedBox(width: 5)]
-          else ...[
-            Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-            const SizedBox(width: 6),
-          ],
-          Text(text, style: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w600, fontSize: 12)),
+          if (icon != null) ...[Icon(icon, size: 12, color: color), const SizedBox(width: 4)],
+          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
         ],
       ),
     );

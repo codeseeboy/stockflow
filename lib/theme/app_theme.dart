@@ -2,62 +2,62 @@ import 'package:flutter/material.dart';
 
 /// Central palette for StockFlow.
 ///
-/// Plain and neutral: charcoal for primary actions, white/gray surfaces, and
-/// colour only where it carries meaning (green = open/ok, amber = attention,
-/// red = problem). No gradients, no glows, nothing decorative — the content
-/// does the talking.
+/// The brand green (matches the logo) on clean white/gray surfaces. Flat by
+/// rule — no gradients, no glows. Colour carries meaning: green = brand/open,
+/// amber = attention, red = problem; category colours make the catalogue easy
+/// to scan.
 class AppColors {
   AppColors._();
 
-  // Primary — neutral charcoal (buttons, links, progress)
-  static const brand = Color(0xFF24292F);
-  static const brandDark = Color(0xFF16191D);
-  static const brandLight = Color(0xFF57606A);
-  static const brandWash = Color(0xFFF0F2F4);
+  // Brand — the StockFlow green
+  static const brand = Color(0xFF12936A);
+  static const brandDark = Color(0xFF0B6E4F);
+  static const brandLight = Color(0xFF3FBE91);
+  static const brandWash = Color(0xFFE7F6EF);
 
-  // Accent — subdued gold (used sparingly: in-lieu labels, carry-over tags)
-  static const accent = Color(0xFF9C7018);
-  static const accentWash = Color(0xFFF5EEDC);
+  // Accent — warm amber (in-lieu labels, carry-over tags)
+  static const accent = Color(0xFFB97D14);
+  static const accentWash = Color(0xFFF9EFD9);
 
-  // Status — muted, readable
-  static const success = Color(0xFF2E7D32);
-  static const warning = Color(0xFFA36A00);
-  static const danger = Color(0xFFC03B3F);
-  static const successWash = Color(0xFFE9F3EA);
-  static const warningWash = Color(0xFFF7EFDE);
-  static const dangerWash = Color(0xFFF9E9E9);
+  // Status
+  static const success = Color(0xFF16A34A);
+  static const warning = Color(0xFFB97D14);
+  static const danger = Color(0xFFD64545);
+  static const successWash = Color(0xFFE4F6EA);
+  static const warningWash = Color(0xFFF9EFD9);
+  static const dangerWash = Color(0xFFFBE8E8);
 
-  // Light neutrals — plain grays, no colour tint
-  static const bg = Color(0xFFF4F5F7);
+  // Light neutrals
+  static const bg = Color(0xFFF5F7F6);
   static const surface = Color(0xFFFFFFFF);
-  static const surfaceMuted = Color(0xFFEEF0F3);
-  static const ink = Color(0xFF20262E);
-  static const inkSoft = Color(0xFF5B6570);
-  static const inkFaint = Color(0xFF97A0A9);
-  static const line = Color(0xFFE0E4E9);
+  static const surfaceMuted = Color(0xFFEFF2F0);
+  static const ink = Color(0xFF17231E);
+  static const inkSoft = Color(0xFF5D6C66);
+  static const inkFaint = Color(0xFF95A29C);
+  static const line = Color(0xFFE2E8E5);
 
   // Dark neutrals
-  static const dBg = Color(0xFF11151A);
-  static const dSurface = Color(0xFF181E25);
-  static const dSurfaceMuted = Color(0xFF20272F);
-  static const dInk = Color(0xFFE8ECF0);
-  static const dInkSoft = Color(0xFF9AA5B0);
-  static const dLine = Color(0xFF2A323C);
+  static const dBg = Color(0xFF0E1613);
+  static const dSurface = Color(0xFF16201C);
+  static const dSurfaceMuted = Color(0xFF1E2925);
+  static const dInk = Color(0xFFEAF0ED);
+  static const dInkSoft = Color(0xFF9DACA5);
+  static const dLine = Color(0xFF283330);
 
   // Dark status washes (muted tints that read on dark surfaces)
-  static const dSuccessWash = Color(0xFF1D3020);
+  static const dSuccessWash = Color(0xFF1A3328);
   static const dWarningWash = Color(0xFF352B16);
   static const dDangerWash = Color(0xFF381F20);
-  static const dBrandWash = Color(0xFF272E36);
+  static const dBrandWash = Color(0xFF1A3D2E);
 
-  // Category accents — muted so they read as labels, not decoration
-  static const cGrains = Color(0xFFB08514);
-  static const cPulses = Color(0xFF8A5FAB);
-  static const cVeg = Color(0xFF3B8558);
-  static const cFruits = Color(0xFFB65546);
-  static const cDairy = Color(0xFF3D6FA8);
-  static const cBakery = Color(0xFFAF6F34);
-  static const cEssentials = Color(0xFF2E8783);
+  // Category accents
+  static const cGrains = Color(0xFFCB9A1C);
+  static const cPulses = Color(0xFF9B62BF);
+  static const cVeg = Color(0xFF36A85A);
+  static const cFruits = Color(0xFFDB5B49);
+  static const cDairy = Color(0xFF3E86E0);
+  static const cBakery = Color(0xFFD08238);
+  static const cEssentials = Color(0xFF16A09A);
 
   static const chartPalette = [
     cGrains,
@@ -70,13 +70,13 @@ class AppColors {
   ];
 }
 
-/// Small, consistent corner radii — squarer = more formal.
+/// Consistent corner radii — soft enough to feel like an app, not a document.
 class AppRadius {
   AppRadius._();
-  static const sm = 6.0;
-  static const md = 8.0;
-  static const lg = 10.0;
-  static const xl = 12.0;
+  static const sm = 8.0;
+  static const md = 10.0;
+  static const lg = 14.0;
+  static const xl = 18.0;
   static const pill = 999.0;
 }
 
@@ -110,10 +110,10 @@ class AppTheme {
       seedColor: AppColors.brand,
       brightness: Brightness.dark,
     ).copyWith(
-      primary: const Color(0xFFCFD6DD),
-      onPrimary: const Color(0xFF16191D),
+      primary: AppColors.brandLight,
+      onPrimary: const Color(0xFF03251A),
       primaryContainer: AppColors.dBrandWash,
-      onPrimaryContainer: AppColors.dInk,
+      onPrimaryContainer: AppColors.brandWash,
       secondary: AppColors.accent,
       onSecondary: const Color(0xFF2A1A06),
       secondaryContainer: const Color(0xFF3A2A12),
