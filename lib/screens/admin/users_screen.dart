@@ -134,6 +134,12 @@ class _UserRow extends StatelessWidget {
               ],
             ),
           ),
+          if (user.role == UserRole.customer)
+            IconButton(
+              tooltip: 'Change zone',
+              onPressed: () => _changeZone(context, store, user),
+              icon: const Icon(Icons.shield_moon_outlined, size: 20),
+            ),
           if (user.role != UserRole.admin)
             IconButton(
               tooltip: 'Remove',
@@ -143,6 +149,34 @@ class _UserRow extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _changeZone(BuildContext context, AppStore store, AppUser user) async {
+    String zone = user.zone.isNotEmpty ? user.zone : (store.zoneNames.isNotEmpty ? store.zoneNames.first : '');
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Zone for ${user.name}'),
+        content: StatefulBuilder(
+          builder: (ctx, setSt) => DropdownButtonFormField<String>(
+            initialValue: store.zoneNames.contains(zone) ? zone : null,
+            decoration: const InputDecoration(labelText: 'Zone / designation', prefixIcon: Icon(Icons.shield_moon_outlined)),
+            items: [for (final z in store.zoneNames) DropdownMenuItem(value: z, child: Text(z))],
+            onChanged: (v) => zone = v ?? zone,
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, zone), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (picked != null && picked.isNotEmpty) {
+      store.setUserZone(user, picked);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${user.name} → $picked')));
+      }
+    }
   }
 }
 
@@ -159,7 +193,7 @@ class _AddUserSheetState extends State<_AddUserSheet> {
   final _phone = TextEditingController(text: '+91 ');
   final _unit = TextEditingController();
   UserRole _role = UserRole.customer;
-  String _zone = kZoneNames.first;
+  late String _zone = widget.store.zoneNames.isNotEmpty ? widget.store.zoneNames.first : '';
 
   @override
   void dispose() {
@@ -204,7 +238,7 @@ class _AddUserSheetState extends State<_AddUserSheet> {
                 helperText: 'Entitlement scale this customer draws against',
                 prefixIcon: Icon(Icons.shield_moon_outlined),
               ),
-              items: [for (final z in kZoneNames) DropdownMenuItem(value: z, child: Text(z))],
+              items: [for (final z in widget.store.zoneNames) DropdownMenuItem(value: z, child: Text(z))],
               onChanged: (v) => setState(() => _zone = v ?? _zone),
             ),
           ],

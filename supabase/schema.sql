@@ -49,7 +49,7 @@ create table if not exists stock_movements (
   created_at  timestamptz not null default now()
 );
 
--- ---------- Weekly order cycles ----------
+-- ---------- Demand cycles (fresh / dry ration demands) ----------
 create table if not exists order_cycles (
   id           uuid primary key default gen_random_uuid(),
   title        text not null,
@@ -57,8 +57,23 @@ create table if not exists order_cycles (
   week_end     date not null,
   status       cycle_status not null default 'open',
   share_token  text unique not null default encode(gen_random_bytes(5),'hex'),
+  designation       text not null default '',   -- zone this demand is scoped to ('' = all)
+  demand_type       text not null default 'fresh', -- 'fresh' | 'dry'
+  days              int  not null default 10,    -- span the demand covers (5/10/15/30)
+  entitlement_month text not null default '',    -- 'YYYY-MM' the demand spends from
+  item_ids          jsonb not null default '[]'::jsonb, -- varieties the admin added
   created_at   timestamptz not null default now()
 );
+
+-- Demand fields for databases created before they existed. Safe to re-run.
+alter table order_cycles add column if not exists designation       text  not null default '';
+alter table order_cycles add column if not exists demand_type       text  not null default 'fresh';
+alter table order_cycles add column if not exists days              int   not null default 10;
+alter table order_cycles add column if not exists entitlement_month text  not null default '';
+alter table order_cycles add column if not exists item_ids          jsonb not null default '[]'::jsonb;
+
+-- Customers carry a zone (designation) that decides their entitlement scale.
+alter table profiles add column if not exists zone text not null default '';
 
 -- ---------- Orders ----------
 create table if not exists orders (

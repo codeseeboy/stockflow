@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_prefs.dart';
 import '../utils/customer_orders.dart';
+import '../utils/entitlement_import.dart';
 import '../utils/item_icon_brain.dart';
 import '../utils/stock_import.dart';
 import 'supabase_service.dart';
@@ -36,43 +37,90 @@ class AppStore extends ChangeNotifier {
   String storeName = 'Central Store';
 
   // ---- Ration zones (admin-editable criteria) -----------------------------
-  final Map<String, double> _zoneMaster = {for (final z in kRationZones) z.name: z.masterLimit};
-  final Map<String, Map<String, double>> _zoneCats = {for (final z in kRationZones) z.name: Map<String, double>.of(z.categoryLimits)};
-  final Map<String, Map<String, double>> _zoneItemMax = {for (final z in kRationZones) z.name: Map<String, double>.of(z.itemMax)};
+  //
+  // A zone is the customer's designation (Officers, Commanders, …). Each holds
+  // its own per-day entitlement scale, so Zone A and Zone B differ. Only the
+  // real Officers sheet ships with the app; the admin creates further zones and
+  // fills them from their own Excel.
+  final Map<String, RationZone> _zones = {
+    for (final z in kRationZones) z.name: z.copyWith(perDay: Map<String, double>.of(z.perDay)),
+  };
 
-  List<String> get zoneNames => kZoneNames;
+  List<String> get zoneNames => _zones.keys.toList();
 
   /// The current (possibly admin-edited) criteria for a zone.
   RationZone zoneFor(String name) {
-    final base = rationZoneFor(name);
-    return RationZone(
-      name: base.name,
-      level: base.level,
-      masterLimit: _zoneMaster[base.name] ?? base.masterLimit,
-      categoryLimits: _zoneCats[base.name] ?? base.categoryLimits,
-      itemMax: _zoneItemMax[base.name] ?? base.itemMax,
-      defaultCategoryLimit: base.defaultCategoryLimit,
+    final key = _zones.keys.firstWhere(
+      (k) => k.toLowerCase() == name.trim().toLowerCase(),
+      orElse: () => '',
     );
+    if (key.isNotEmpty) return _zones[key]!;
+    return _zones.values.isNotEmpty ? _zones.values.first : kOfficersZone;
   }
 
-  void setZoneMaster(String zone, double value) {
-    _zoneMaster[zone] = value < 0 ? 0 : value;
+  /// Create a new designation/zone, optionally starting from an existing scale.
+  /// Returns false when the name is blank or already taken.
+  bool addZone(String name, {String? copyFrom}) {
+    final n = name.trim();
+    if (n.isEmpty) return false;
+    if (_zones.keys.any((k) => k.toLowerCase() == n.toLowerCase())) return false;
+    final base = copyFrom != null ? zoneFor(copyFrom) : kOfficersZone;
+    _zones[n] = RationZone(
+      name: n,
+      level: n,
+      perDay: Map<String, double>.of(base.perDay),
+      itemMax: Map<String, double>.of(base.itemMax),
+    );
+    notifyListeners();
+    return true;
+  }
+
+  /// Remove a zone. The last remaining zone can't be deleted.
+  void removeZone(String name) {
+    if (_zones.length <= 1) return;
+    _zones.remove(name);
     notifyListeners();
   }
 
-  void setZoneCategoryLimit(String zone, String category, double value) {
-    (_zoneCats[zone] ??= {})[category] = value < 0 ? 0 : value;
+  /// Set a category's per-person-per-day entitlement for a zone. Every allowance
+  /// (a 10-day demand, a whole month) is derived from this rate.
+  void setZonePerDay(String zone, String category, double perDay) {
+    final z = zoneFor(zone);
+    final next = Map<String, double>.of(z.perDay)..[category] = perDay < 0 ? 0 : perDay;
+    _zones[z.name] = z.copyWith(perDay: next);
     notifyListeners();
   }
 
   void setZoneItemMax(String zone, String itemName, double value) {
-    final m = _zoneItemMax[zone] ??= {};
+    final z = zoneFor(zone);
+    final next = Map<String, double>.of(z.itemMax);
     if (value <= 0) {
-      m.remove(itemName);
+      next.remove(itemName);
     } else {
-      m[itemName] = value;
+      next[itemName] = value;
     }
+    _zones[z.name] = z.copyWith(itemMax: next);
     notifyListeners();
+  }
+
+  /// Apply an entitlement sheet (the unit's Excel) to a zone.
+  EntitlementImportSummary importEntitlement(String zone, List<EntitlementRow> rows) {
+    if (rows.isEmpty) return const EntitlementImportSummary(updated: 0, skipped: 0);
+    final z = zoneFor(zone);
+    final perDay = Map<String, double>.of(z.perDay);
+    var updated = 0;
+    var skipped = 0;
+    for (final r in rows) {
+      if (r.category.isEmpty) {
+        skipped++;
+        continue;
+      }
+      perDay[r.category] = r.perDay;
+      updated++;
+    }
+    _zones[z.name] = z.copyWith(perDay: perDay);
+    notifyListeners();
+    return EntitlementImportSummary(updated: updated, skipped: skipped);
   }
 
   /// Customers assigned to [zone].
@@ -103,6 +151,14 @@ class AppStore extends ChangeNotifier {
   void markReady() {
     _bootstrapped = true;
     notifyListeners();
+  }
+
+  /// Load the in-memory demo catalogue (RIK Officers scale + sample demands).
+  /// Normally the constructor seeds this when Supabase isn't configured; this
+  /// lets tests and offline demos seed on demand. No-op once data exists.
+  @visibleForTesting
+  void seedDemoData() {
+    if (items.isEmpty) _seed();
   }
 
   /// Connect to Supabase: restore session, load real data + subscribe to live changes.
@@ -363,6 +419,147 @@ class AppStore extends ChangeNotifier {
     return list;
   }
 
+  // ---- Entitlement ledger -------------------------------------------------
+  //
+  // The customer is never shown warehouse stock. What they see — and what caps
+  // their order — is their own balance for the month:
+  //
+  //     balance(category) = allowance + carriedIn − consumed
+  //
+  // Because the balance is held per category and shared by every demand in the
+  // month, bread taken on a fresh demand is spent out of the same Cereals
+  // balance the dry demand later draws on (carry-forward *within* the month),
+  // and whatever is left at month end is added on top of next month's allowance
+  // (carry-forward *to the next month*: 500 + 300 = 800).
+
+  /// Never walk back further than this when rolling carry-forward forward — a
+  /// stale clock or bad data shouldn't spin the loop.
+  static const int _maxCarryMonths = 36;
+
+  /// The entitlement month an order was placed against (its demand's month,
+  /// falling back to when it was placed if the demand is gone).
+  RationMonth monthOfOrder(Order o) {
+    final c = cycles.where((x) => x.id == o.cycleId);
+    if (c.isNotEmpty) return c.first.month;
+    return RationMonth.of(o.createdAt);
+  }
+
+  /// The RIK category an order line belongs to. Resolves by item id, then by
+  /// name (the item may have been renamed or removed), then via the RIK sheet.
+  String? categoryOfLine(OrderLine line) {
+    final byId = items.where((i) => i.id == line.itemId);
+    if (byId.isNotEmpty) return byId.first.category;
+    final byName = items.where((i) => i.name.toLowerCase() == line.name.toLowerCase());
+    if (byName.isNotEmpty) return byName.first.category;
+    return rikCategoryForArticle(line.name);
+  }
+
+  /// Quantity ordered per category, per month, for one customer. Cancelled
+  /// orders don't consume entitlement.
+  Map<String, Map<String, double>> _consumedByMonth(String name, String phone) {
+    final out = <String, Map<String, double>>{};
+    for (final o in customerOrdersFor(this, name, phone)) {
+      if (o.status == OrderStatus.cancelled) continue;
+      final m = monthOfOrder(o).key;
+      final bucket = out.putIfAbsent(m, () => <String, double>{});
+      for (final l in o.lines) {
+        final cat = categoryOfLine(l);
+        if (cat == null) continue;
+        bucket[cat] = (bucket[cat] ?? 0) + l.qty;
+      }
+    }
+    return out;
+  }
+
+  /// What this customer has already taken in [month], per category — across
+  /// every demand in that month, fresh and dry alike.
+  Map<String, double> consumedByCategory(String name, String phone, RationMonth month) =>
+      _consumedByMonth(name, phone)[month.key] ?? const {};
+
+  /// Leftover rolled in from earlier months. Starts at the customer's first
+  /// ordering month and rolls each month's leftover forward onto the next.
+  Map<String, double> carriedInto(String name, String phone, String zone, RationMonth month) {
+    final consumedByMonth = _consumedByMonth(name, phone);
+    if (consumedByMonth.isEmpty) return const {};
+
+    final months = consumedByMonth.keys.map(RationMonth.tryParse).nonNulls.toList()..sort();
+    var from = months.first;
+    if (!from.isBefore(month)) return const {};
+    // Cap how far back we roll from, so a bad date can't spin this.
+    if (from.monthsTo(month) > _maxCarryMonths) {
+      from = month;
+      for (var i = 0; i < _maxCarryMonths; i++) {
+        from = from.previous;
+      }
+    }
+
+    final z = zoneFor(zone);
+    var carry = <String, double>{};
+    for (var m = from; m.isBefore(month); m = m.next) {
+      final consumed = consumedByMonth[m.key] ?? const <String, double>{};
+      final next = <String, double>{};
+      for (final c in kCategories) {
+        final left = z.monthlyAllowance(c.name, m) + (carry[c.name] ?? 0) - (consumed[c.name] ?? 0);
+        // Only a surplus rolls forward — an overdraw isn't carried as a debt.
+        if (left > 1e-9) next[c.name] = left;
+      }
+      carry = next;
+    }
+    return carry;
+  }
+
+  /// The customer's full entitlement position for a month — one row per
+  /// category. This is what the customer sees in place of stock, and what caps
+  /// how much they may order. A customer who was on leave and ordered nothing
+  /// simply has `consumed = 0`, so they see their entitlement in full.
+  List<CategoryBalance> balancesFor({
+    required String name,
+    required String phone,
+    required String zone,
+    RationMonth? month,
+  }) {
+    final m = month ?? currentMonth;
+    final z = zoneFor(zone);
+    final consumed = consumedByCategory(name, phone, m);
+    final carried = carriedInto(name, phone, zone, m);
+    return [
+      for (final c in kCategories)
+        CategoryBalance(
+          category: c.name,
+          unit: rikCategoryByName(c.name)?.unit ?? 'kg',
+          allowance: z.monthlyAllowance(c.name, m),
+          carriedIn: carried[c.name] ?? 0,
+          consumed: consumed[c.name] ?? 0,
+        ),
+    ];
+  }
+
+  /// One category's balance for a customer.
+  CategoryBalance balanceOf({
+    required String name,
+    required String phone,
+    required String zone,
+    required String category,
+    RationMonth? month,
+  }) {
+    final m = month ?? currentMonth;
+    final z = zoneFor(zone);
+    return CategoryBalance(
+      category: category,
+      unit: rikCategoryByName(category)?.unit ?? 'kg',
+      allowance: z.monthlyAllowance(category, m),
+      carriedIn: carriedInto(name, phone, zone, m)[category] ?? 0,
+      consumed: consumedByCategory(name, phone, m)[category] ?? 0,
+    );
+  }
+
+  /// The entitlement month "now" falls in.
+  RationMonth get currentMonth => RationMonth.of(DateTime.now());
+
+  /// The articles that appear on a demand — the admin's selection, narrowed to
+  /// the demand's ration type. What isn't added here, the customer never sees.
+  List<Item> itemsForCycle(OrderCycle cycle) => items.where(cycle.includes).toList();
+
   // ---- Mutations ----------------------------------------------------------
 
   Order placeOrder({
@@ -370,8 +567,37 @@ class AppStore extends ChangeNotifier {
     required String customerPhone,
     required Map<String, double> cart,
     String? cycleId,
+    String zone = '',
   }) {
     final targetCycleId = cycleId ?? orderingCycle.id;
+    final cycle = cycles.where((c) => c.id == targetCycleId).firstOrNull;
+
+    // Guard the entitlement balance here too, not just in the form — a page left
+    // open while another demand was placed must not be able to overdraw.
+    final month = cycle?.month ?? currentMonth;
+    final wanted = <String, double>{};
+    cart.forEach((itemId, qty) {
+      if (qty <= 0) return;
+      final item = items.where((i) => i.id == itemId).firstOrNull;
+      if (item == null) return;
+      wanted[item.category] = (wanted[item.category] ?? 0) + qty;
+    });
+    for (final entry in wanted.entries) {
+      final bal = balanceOf(
+        name: customerName,
+        phone: customerPhone,
+        zone: zone,
+        category: entry.key,
+        month: month,
+      );
+      if (entry.value > bal.remaining + 1e-6) {
+        throw StateError(
+          'Only ${_fmt(bal.remaining)} ${bal.unit} of ${entry.key} is left in your '
+          '${month.label} entitlement — reduce the quantity and try again.',
+        );
+      }
+    }
+
     final lines = <OrderLine>[];
     cart.forEach((itemId, qty) {
       if (qty <= 0) return;
@@ -627,8 +853,26 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
     final sb = _sb;
     if (sb != null) {
-      _fire(sb.insertUser(name: name, role: role, phone: phone, unit: unit).then((_) => reload()));
+      _fire(sb.insertUser(name: name, role: role, phone: phone, unit: unit, zone: zone).then((_) => reload()));
     }
+  }
+
+  /// Assign a customer to a zone (their designation) — this is what decides
+  /// which entitlement scale and which demands apply to them.
+  void setUserZone(AppUser user, String zone) {
+    final i = users.indexWhere((u) => u.id == user.id);
+    if (i < 0) return;
+    users[i] = AppUser(
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      phone: user.phone,
+      unit: user.unit,
+      email: user.email,
+      zone: zone,
+    );
+    notifyListeners();
+    _fire(_sb?.updateUserZone(user.id, zone));
   }
 
   void removeUser(AppUser user) {
@@ -646,10 +890,28 @@ class AppStore extends ChangeNotifier {
   List<AppUser> get staff => users.where((u) => u.role != UserRole.customer).toList();
   List<AppUser> get customers => users.where((u) => u.role == UserRole.customer).toList();
 
-  /// Open a new ordering window. [designation] scopes it to an audience (empty =
-  /// everyone). [closeOthers] false keeps existing open windows live too, so you
-  /// can run two windows in a week or several per-designation links at once.
-  OrderCycle openNewCycle({String designation = '', bool closeOthers = true}) {
+  /// How many demands already exist for a month + zone — used to name the next
+  /// one ("1st fresh demand", "2nd fresh demand", …).
+  int demandCountIn(RationMonth month, String designation, DemandType type) => cycles
+      .where((c) => c.month == month && c.designation == designation.trim() && c.type == type)
+      .length;
+
+  /// Open the demand — "we are ready to accept the demand". Until one is open,
+  /// customers see "demand acceptance has not started yet" and no order page.
+  ///
+  /// [designation] scopes it to a zone (empty = everyone). [type] picks fresh or
+  /// dry, [days] is the span it covers (5 / 10 / 15 / 30 from the unit's Excel),
+  /// [month] is the entitlement month it spends from, and [itemIds] are the
+  /// varieties the admin added — what isn't in there, the customer never sees.
+  /// [closeOthers] false keeps existing open demands live too.
+  OrderCycle openNewCycle({
+    String designation = '',
+    bool closeOthers = true,
+    DemandType type = DemandType.fresh,
+    int? days,
+    RationMonth? month,
+    Set<String>? itemIds,
+  }) {
     final previouslyOpen = <String>[];
     if (closeOthers) {
       for (final c in cycles) {
@@ -659,20 +921,34 @@ class AppStore extends ChangeNotifier {
         }
       }
     }
-    final last = cycles.isNotEmpty ? cycles.first : null;
-    final start = (last?.weekEnd ?? DateTime.now()).add(const Duration(days: 1));
-    final end = start.add(const Duration(days: 6));
-    final num = int.tryParse((last?.title ?? '23').replaceAll(RegExp(r'[^0-9]'), '')) ?? 23;
+    final m = month ?? currentMonth;
+    final span = days ?? type.defaultDays;
     final label = designation.trim();
+
+    // Fresh demands run in ~10-day slices through the month; the dry demand
+    // covers the whole month.
+    final index = demandCountIn(m, label, type);
+    final start = type == DemandType.dry
+        ? m.firstDay
+        : m.firstDay.add(Duration(days: index * span));
+    var end = start.add(Duration(days: span - 1));
+    if (end.isAfter(m.lastDay)) end = m.lastDay;
+
+    final ordinal = _ordinal(index + 1);
+    final name = '$ordinal ${type.label.toLowerCase()} demand · ${m.shortLabel}';
     final slug = label.isEmpty ? '' : '-${label.replaceAll(RegExp(r'\s+'), '').toLowerCase()}';
     final cycle = OrderCycle(
-      id: 'CY-${num + 1}$slug',
-      title: label.isEmpty ? 'Week ${num + 1}' : 'Week ${num + 1} · $label',
+      id: 'CY-${m.key}-${type.name}-${index + 1}$slug',
+      title: label.isEmpty ? name : '$name · $label',
       weekStart: start,
       weekEnd: end,
       status: CycleStatus.open,
       shareToken: _token(),
       designation: label,
+      type: type,
+      days: span,
+      month: m,
+      itemIds: itemIds,
     );
     cycles.insert(0, cycle);
     notifyListeners();
@@ -681,9 +957,19 @@ class AppStore extends ChangeNotifier {
       for (final id in previouslyOpen) {
         _fire(sb.updateCycleStatus(id, CycleStatus.closed));
       }
-      _fire(sb.insertCycle(title: cycle.title, weekStart: start, weekEnd: end).then((_) => reload()));
+      _fire(sb.insertCycle(cycle).then((_) => reload()));
     }
     return cycle;
+  }
+
+  /// Replace the varieties on a demand — the admin picking, say, 9 of the 30
+  /// fruit varieties. An empty set means "every article valid for this type".
+  void setCycleItems(OrderCycle cycle, Set<String> itemIds) {
+    final i = cycles.indexWhere((c) => c.id == cycle.id);
+    if (i < 0) return;
+    cycles[i] = cycle.copyWith(itemIds: itemIds);
+    notifyListeners();
+    _fire(_sb?.updateCycleItems(cycle.id, itemIds));
   }
 
   void closeCycle(OrderCycle cycle) {
@@ -696,6 +982,11 @@ class AppStore extends ChangeNotifier {
     cycle.status = CycleStatus.open;
     notifyListeners();
     _fire(_sb?.updateCycleStatus(cycle.id, CycleStatus.open).then((_) => reload()));
+  }
+
+  static String _ordinal(int n) {
+    if (n >= 11 && n <= 13) return '${n}th';
+    return switch (n % 10) { 1 => '${n}st', 2 => '${n}nd', 3 => '${n}rd', _ => '${n}th' };
   }
 
   // ---- Helpers ------------------------------------------------------------
@@ -740,10 +1031,31 @@ class AppStore extends ChangeNotifier {
       AppUser(id: 'U7', name: 'Sub Lt Charlie', role: UserRole.customer, phone: '+91 90000 22004', unit: 'OM Block C', zone: 'Officers'),
     ]);
 
+    // The month's demand cycle as the unit runs it: three fresh demands of
+    // ~10 days each, then one dry demand covering the whole month.
+    final now = DateTime.now();
+    final m = RationMonth.of(now);
+    final prev = m.previous;
+
     cycles.addAll([
-      OrderCycle(id: 'CY-23', title: 'RIK · Officers · Wk 23', weekStart: DateTime(2026, 6, 9), weekEnd: DateTime(2026, 6, 15), status: CycleStatus.open, shareToken: 'rikoff23', designation: 'Officers'),
-      OrderCycle(id: 'CY-22', title: 'RIK · Officers · Wk 22', weekStart: DateTime(2026, 6, 2), weekEnd: DateTime(2026, 6, 8), status: CycleStatus.closed, shareToken: 'rikoff22', designation: 'Officers'),
-      OrderCycle(id: 'CY-21', title: 'RIK · Officers · Wk 21', weekStart: DateTime(2026, 5, 26), weekEnd: DateTime(2026, 6, 1), status: CycleStatus.closed, shareToken: 'rikoff21', designation: 'Officers'),
+      OrderCycle(
+        id: 'CY-${m.key}-fresh-2', title: '2nd fresh demand · ${m.shortLabel} · Officers',
+        weekStart: m.firstDay.add(const Duration(days: 10)), weekEnd: m.firstDay.add(const Duration(days: 19)),
+        status: CycleStatus.open, shareToken: 'rikfresh2', designation: 'Officers',
+        type: DemandType.fresh, days: 10, month: m,
+      ),
+      OrderCycle(
+        id: 'CY-${m.key}-fresh-1', title: '1st fresh demand · ${m.shortLabel} · Officers',
+        weekStart: m.firstDay, weekEnd: m.firstDay.add(const Duration(days: 9)),
+        status: CycleStatus.closed, shareToken: 'rikfresh1', designation: 'Officers',
+        type: DemandType.fresh, days: 10, month: m,
+      ),
+      OrderCycle(
+        id: 'CY-${prev.key}-dry-1', title: '1st dry demand · ${prev.shortLabel} · Officers',
+        weekStart: prev.firstDay, weekEnd: prev.lastDay,
+        status: CycleStatus.closed, shareToken: 'rikdry0', designation: 'Officers',
+        type: DemandType.dry, days: prev.days, month: prev,
+      ),
     ]);
 
     Item pick(String name) => items.firstWhere((i) => i.name == name, orElse: () => items.first);
@@ -752,22 +1064,24 @@ class AppStore extends ChangeNotifier {
       return OrderLine(itemId: it.id, name: it.name, emoji: it.emoji, unit: it.unit, qty: qty);
     }
 
-    final now = DateTime.now();
     orders.addAll([
+      // Fresh demand: bread comes out of the Cereals balance, so the dry demand
+      // later in the month sees a smaller Cereals balance.
       Order(
-        id: 'ORD-${_orderSeq++}', cycleId: 'CY-23', customerName: 'Wardroom Mess', customerPhone: '+91 90000 22001',
-        status: OrderStatus.confirmed, createdAt: now.subtract(const Duration(hours: 3)),
-        lines: [line('Atta 1 kg', 3), line('Meat Fresh 1 kg', 1.5), line('Tomato', 1), line('Eggs', 14)],
+        id: 'ORD-${_orderSeq++}', cycleId: 'CY-${m.key}-fresh-1', customerName: 'Wardroom Mess', customerPhone: '+91 90000 22001',
+        status: OrderStatus.confirmed, createdAt: m.firstDay.add(const Duration(days: 1)),
+        lines: [line('Brown Bread 400 g', 1.2), line('Meat Fresh 1 kg', 1.5), line('Tomato', 1), line('Eggs', 14)],
       ),
       Order(
-        id: 'ORD-${_orderSeq++}', cycleId: 'CY-23', customerName: 'Lt Bravo', customerPhone: '+91 90000 22002',
-        status: OrderStatus.pending, createdAt: now.subtract(const Duration(hours: 6)),
-        lines: [line('Potato', 0.75), line('Onion', 0.4), line('Refined Oil 1 L', 0.5), line('Sugar 1 kg', 0.6)],
+        id: 'ORD-${_orderSeq++}', cycleId: 'CY-${m.key}-fresh-1', customerName: 'Lt Bravo', customerPhone: '+91 90000 22002',
+        status: OrderStatus.pending, createdAt: m.firstDay.add(const Duration(days: 2)),
+        lines: [line('Potato', 0.75), line('Onion', 0.4), line('Apple Delicious', 1.6)],
       ),
+      // Last month's dry demand — its leftover carries into this month.
       Order(
-        id: 'ORD-${_orderSeq++}', cycleId: 'CY-22', customerName: 'Lt Cdr Delta', customerPhone: '+91 90000 22003',
-        status: OrderStatus.fulfilled, createdAt: now.subtract(const Duration(days: 2, hours: 2)),
-        lines: [line('India Gate Rozana 1 kg', 3), line('Apple Delicious', 1.6)],
+        id: 'ORD-${_orderSeq++}', cycleId: 'CY-${prev.key}-dry-1', customerName: 'Lt Cdr Delta', customerPhone: '+91 90000 22003',
+        status: OrderStatus.fulfilled, createdAt: prev.firstDay.add(const Duration(days: 3)),
+        lines: [line('India Gate Rozana 1 kg', 3), line('Dal Arhar 400 g', 0.8)],
       ),
     ]);
   }

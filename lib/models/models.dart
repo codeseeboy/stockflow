@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
+import '../data/entitlement.dart';
 import '../data/rik_entitlement.dart';
 import '../theme/app_theme.dart';
 
+export '../data/entitlement.dart';
 export '../data/rik_entitlement.dart';
 
 enum UserRole { admin, worker, customer }
@@ -76,55 +78,80 @@ final List<Category> kCategories = [
 Category categoryOf(String name) =>
     kCategories.firstWhere((c) => c.name == name, orElse: () => kCategories.last);
 
-/// A ration entitlement tier ("zone"). Models the Indian-Navy ration system:
-/// each zone has its own criteria — a master ration cap, a cap per food
-/// category, and optional per-item maximums. The customer never sees stock;
-/// these limits (not availability) govern how much they may order.
+/// A ration entitlement scale — a "zone", which the unit treats as a
+/// **designation** (Officers, Commanders, …). Each zone carries its own
+/// criteria, so Zone A and Zone B differ in entitlement.
+///
+/// The scale is held as a **per-day rate per category** — the form the RIK
+/// sheet actually comes in — because every allowance in the system is
+/// `perDay × days`: a month's allowance uses the days in the month, and a
+/// demand's own span (5 / 10 / 15 / 30 days, from the unit's Excel) uses its
+/// own day count. The customer never sees stock; these rates, not availability,
+/// govern how much they may order.
 class RationZone {
-  final String name; // 'High Level' / 'Medium Level' / 'Low Level'
+  final String name; // 'Officers', 'Commanders', …
   final String level; // short badge label
-  final double masterLimit; // total ration points across all categories
-  final Map<String, double> categoryLimits; // per-category cap
+  final Map<String, double> perDay; // entitlement per person per DAY, by category
   final Map<String, double> itemMax; // optional per-item cap, by item name
-  final double defaultCategoryLimit;
+  final double defaultPerDay;
 
   const RationZone({
     required this.name,
     required this.level,
-    required this.masterLimit,
-    this.categoryLimits = const {},
+    this.perDay = const {},
     this.itemMax = const {},
-    this.defaultCategoryLimit = 8,
+    this.defaultPerDay = 0.05,
   });
 
-  double categoryLimit(String category) => categoryLimits[category] ?? defaultCategoryLimit;
+  /// Entitlement per person per day for a category.
+  double perDayFor(String category) => perDay[category] ?? defaultPerDay;
+
+  /// Entitlement for a span of [days] — e.g. a 10-day fresh demand.
+  double allowanceFor(String category, int days) => perDayFor(category) * days;
+
+  /// The month's entitlement for a category (per-day × days in that month).
+  /// This is the figure the customer's balance is measured against.
+  double monthlyAllowance(String category, RationMonth month) =>
+      allowanceFor(category, month.days);
+
+  /// Total entitlement across all categories for a month — informational only
+  /// (the enforced cap is per category, as the unit specified).
+  double monthlyTotal(RationMonth month) =>
+      kCategories.fold(0.0, (s, c) => s + monthlyAllowance(c.name, month));
+
   double maxForItem(String itemName) => itemMax[itemName] ?? double.infinity;
+
+  RationZone copyWith({String? name, String? level, Map<String, double>? perDay, Map<String, double>? itemMax}) =>
+      RationZone(
+        name: name ?? this.name,
+        level: level ?? this.level,
+        perDay: perDay ?? this.perDay,
+        itemMax: itemMax ?? this.itemMax,
+        defaultPerDay: defaultPerDay,
+      );
 }
 
-double _rikCap(double perDay) => double.parse((perDay * kRationPeriodDays).toStringAsFixed(3));
-
-final Map<String, double> _officersCategoryLimits = {
-  for (final c in kRikOfficers) c.name: _rikCap(c.perDay),
+/// The real Officers per-day scale, straight from the RIK sheet.
+final Map<String, double> kOfficersPerDay = {
+  for (final c in kRikOfficers) c.name: c.perDay,
 };
 
-/// The Officers ration scale, derived from the real RIK per-day entitlement
-/// × the ordering period (a week). Category caps and the master total come
-/// straight from the sheet; admins can still tune them per zone in the store.
-final RationZone _officersZone = RationZone(
+/// The Officers ration scale — the one real sheet the unit has given us so far.
+/// Further zones (Sailors, Commanders, …) are created by the admin and filled
+/// in from their own Excel, rather than being invented here.
+final RationZone kOfficersZone = RationZone(
   name: 'Officers',
   level: 'Officers',
-  masterLimit: _officersCategoryLimits.values.fold(0.0, (s, v) => s + v),
-  categoryLimits: _officersCategoryLimits,
+  perDay: kOfficersPerDay,
   itemMax: const {},
 );
 
-/// Ration scales by personnel category. Currently only the real Officers sheet
-/// is loaded; more (Sailors, etc.) can be added as their scales arrive.
-final List<RationZone> kRationZones = [_officersZone];
+/// Ration scales shipped with the app. Admins can add more at runtime.
+final List<RationZone> kRationZones = [kOfficersZone];
 
 final List<String> kZoneNames = [for (final z in kRationZones) z.name];
 
-/// Resolve a scale by name (case-insensitive); falls back to the first (Officers).
+/// Resolve a built-in scale by name (case-insensitive); falls back to Officers.
 RationZone rationZoneFor(String name) {
   final n = name.trim().toLowerCase();
   return kRationZones.firstWhere(
@@ -189,6 +216,13 @@ class AppUser {
   });
 }
 
+/// A demand window — what the unit calls "opening the demand".
+///
+/// The unit raises three **fresh** demands a month (~10 days each) and one
+/// **dry** demand covering the whole month. Every demand in a month draws from
+/// that month's entitlement balance, which is why [month] matters: bread taken
+/// on a fresh demand is spent out of the same Cereals balance the dry demand
+/// later draws on.
 class OrderCycle {
   final String id;
   final String title;
@@ -202,6 +236,21 @@ class OrderCycle {
   /// can see and use this window.
   final String designation;
 
+  /// Fresh ration or dry ration — decides which articles can appear at all.
+  final DemandType type;
+
+  /// How many days this demand covers (5 / 10 / 15 / 30 — from the unit's Excel).
+  /// Informational for the customer: the enforced cap is the month's balance.
+  final int days;
+
+  /// The entitlement month this demand spends from.
+  final RationMonth month;
+
+  /// The varieties the admin added to this demand. Empty = every article valid
+  /// for [type]. The customer only ever sees what's in here — "if I am not
+  /// adding it, the customer will not see it".
+  final Set<String> itemIds;
+
   OrderCycle({
     required this.id,
     required this.title,
@@ -210,12 +259,44 @@ class OrderCycle {
     required this.status,
     required this.shareToken,
     this.designation = '',
-  });
+    this.type = DemandType.fresh,
+    int? days,
+    RationMonth? month,
+    Set<String>? itemIds,
+  })  : days = days ?? type.defaultDays,
+        month = month ?? RationMonth.of(weekStart),
+        itemIds = itemIds ?? const {};
 
   /// True when this window is open to everyone (no designation restriction).
   bool get isPublic => designation.trim().isEmpty;
 
+  /// True when the admin has hand-picked the varieties on this demand.
+  bool get hasCuratedList => itemIds.isNotEmpty;
+
+  /// Whether an article appears on this demand list: it must be valid for the
+  /// demand's ration type, and — once the admin has curated the list — be one
+  /// of the varieties they added.
+  bool includes(Item item) {
+    if (!itemAllowedIn(type, item.category, item.name)) return false;
+    return itemIds.isEmpty || itemIds.contains(item.id);
+  }
+
   String get link => '${SupabaseConfig.publicWebBase}/c/$shareToken';
+
+  OrderCycle copyWith({String? title, CycleStatus? status, DemandType? type, int? days, RationMonth? month, Set<String>? itemIds}) =>
+      OrderCycle(
+        id: id,
+        title: title ?? this.title,
+        weekStart: weekStart,
+        weekEnd: weekEnd,
+        status: status ?? this.status,
+        shareToken: shareToken,
+        designation: designation,
+        type: type ?? this.type,
+        days: days ?? this.days,
+        month: month ?? this.month,
+        itemIds: itemIds ?? this.itemIds,
+      );
 }
 
 class OrderLine {

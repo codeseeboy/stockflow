@@ -224,15 +224,21 @@ class SupabaseService {
     required UserRole role,
     required String phone,
     required String unit,
+    String zone = '',
   }) =>
       client.from('profiles').insert({
         'name': name,
         'role': role.name,
         'phone': phone,
         'unit': unit,
+        'zone': zone,
       });
 
   Future<void> deleteUser(String id) => client.from('profiles').delete().eq('id', id);
+
+  /// The customer's zone / designation — decides their entitlement scale.
+  Future<void> updateUserZone(String id, String zone) =>
+      client.from('profiles').update({'zone': zone}).eq('id', id);
 
   Future<void> updateOrderStatus(String id, OrderStatus status) =>
       client.from('orders').update({'status': status.name}).eq('id', id);
@@ -240,16 +246,20 @@ class SupabaseService {
   Future<void> updateCycleStatus(String id, CycleStatus status) =>
       client.from('order_cycles').update({'status': status.name}).eq('id', id);
 
-  Future<void> insertCycle({
-    required String title,
-    required DateTime weekStart,
-    required DateTime weekEnd,
-  }) =>
-      client.from('order_cycles').insert({
-        'title': title,
-        'week_start': weekStart.toIso8601String(),
-        'week_end': weekEnd.toIso8601String(),
-        'status': 'open',
+  /// The varieties the admin added to a demand.
+  Future<void> updateCycleItems(String id, Set<String> itemIds) =>
+      client.from('order_cycles').update({'item_ids': itemIds.toList()}).eq('id', id);
+
+  Future<void> insertCycle(OrderCycle c) => client.from('order_cycles').insert({
+        'title': c.title,
+        'week_start': c.weekStart.toIso8601String(),
+        'week_end': c.weekEnd.toIso8601String(),
+        'status': c.status.name,
+        'designation': c.designation,
+        'demand_type': c.type.name,
+        'days': c.days,
+        'entitlement_month': c.month.key,
+        'item_ids': c.itemIds.toList(),
       });
 
   // ---- Realtime ----------------------------------------------------------
@@ -309,16 +319,33 @@ class SupabaseService {
         phone: (r['phone'] as String?) ?? '',
         unit: (r['unit'] as String?) ?? '',
         email: (r['email'] as String?) ?? '',
+        zone: (r['zone'] as String?) ?? '',
       );
 
-  OrderCycle _cycle(Map<String, dynamic> r) => OrderCycle(
-        id: r['id'].toString(),
-        title: r['title'] as String,
-        weekStart: DateTime.parse(r['week_start'].toString()),
-        weekEnd: DateTime.parse(r['week_end'].toString()),
-        status: CycleStatus.values.byName((r['status'] as String?) ?? 'open'),
-        shareToken: (r['share_token'] as String?) ?? '',
-      );
+  /// Demand fields are read defensively: a database that hasn't had the
+  /// migration applied yet simply falls back to the defaults, so the app keeps
+  /// working instead of failing to load its cycles.
+  OrderCycle _cycle(Map<String, dynamic> r) {
+    final weekStart = DateTime.parse(r['week_start'].toString());
+    final rawType = (r['demand_type'] as String?) ?? '';
+    final type = DemandType.values.where((t) => t.name == rawType).firstOrNull ?? DemandType.fresh;
+    final rawDays = (r['days'] as num?)?.toInt();
+    final month = RationMonth.tryParse((r['entitlement_month'] as String?) ?? '') ?? RationMonth.of(weekStart);
+    final ids = (r['item_ids'] as List?)?.map((e) => e.toString()).toSet();
+    return OrderCycle(
+      id: r['id'].toString(),
+      title: r['title'] as String,
+      weekStart: weekStart,
+      weekEnd: DateTime.parse(r['week_end'].toString()),
+      status: CycleStatus.values.byName((r['status'] as String?) ?? 'open'),
+      shareToken: (r['share_token'] as String?) ?? '',
+      designation: (r['designation'] as String?) ?? '',
+      type: type,
+      days: rawDays != null && rawDays > 0 ? rawDays : type.defaultDays,
+      month: month,
+      itemIds: ids,
+    );
+  }
 
   CustomerBroadcast _broadcast(Map<String, dynamic> r) => CustomerBroadcast(
         id: r['id'].toString(),

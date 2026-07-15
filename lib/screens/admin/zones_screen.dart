@@ -4,7 +4,10 @@ import 'package:provider/provider.dart';
 import '../../data/app_store.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/entitlement_import.dart';
+import '../../utils/file_picker.dart';
 import '../../widgets/ui_kit.dart';
+import 'demand_builder_screen.dart';
 import 'link_detail_screen.dart';
 
 ({Color color, IconData icon}) _zoneStyle(String level) {
@@ -52,6 +55,49 @@ Future<void> _editNumber(
 class ZonesScreen extends StatelessWidget {
   const ZonesScreen({super.key});
 
+  Future<void> _newZone(BuildContext context, AppStore store) async {
+    final ctrl = TextEditingController();
+    String copyFrom = store.zoneNames.isNotEmpty ? store.zoneNames.first : '';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New zone / designation'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('A zone is a designation — Officers, Commanders, Sailors — with its own entitlement scale.'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Name', prefixIcon: Icon(Icons.shield_moon_outlined)),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: copyFrom,
+              decoration: const InputDecoration(labelText: 'Start from', prefixIcon: Icon(Icons.copy_all_outlined)),
+              items: [for (final z in store.zoneNames) DropdownMenuItem(value: z, child: Text('$z scale'))],
+              onChanged: (v) => copyFrom = v ?? copyFrom,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      final created = store.addZone(ctrl.text, copyFrom: copyFrom.isEmpty ? null : copyFrom);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(created ? '${ctrl.text.trim()} zone created' : 'That zone already exists'),
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
@@ -63,9 +109,14 @@ class ZonesScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SectionHeader(
+              SectionHeader(
                 title: 'Zones',
-                subtitle: 'RIK entitlement scales — each controls its own customers, criteria and links',
+                subtitle: 'Designations — each with its own RIK entitlement scale, customers and demands',
+                action: FilledButton.icon(
+                  onPressed: () => _newZone(context, store),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('New zone'),
+                ),
               ),
               const SizedBox(height: 16),
               LayoutBuilder(builder: (context, c) {
@@ -123,7 +174,7 @@ class _ZoneCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(zone.name, style: t.titleLarge),
           const SizedBox(height: 2),
-          Text('Master ration ${fmtNum(zone.masterLimit)} units', style: t.bodyMedium),
+          Text('${fmtNum(zone.monthlyTotal(store.currentMonth))} units / person · ${store.currentMonth.label}', style: t.bodyMedium),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -141,7 +192,7 @@ class _ZoneCard extends StatelessWidget {
               const SizedBox(width: 4),
               Icon(Icons.arrow_forward_rounded, size: 16, color: style.color),
               const Spacer(),
-              Text('${zone.categoryLimits.length} category caps', style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+              Text('${zone.perDay.length} category rates', style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
             ],
           ),
         ],
@@ -215,9 +266,9 @@ class ZoneDetailScreen extends StatelessWidget {
                   final cols = c.maxWidth > 720 ? 4 : 2;
                   final w = (c.maxWidth - (cols - 1) * 12) / cols;
                   final tiles = [
-                    StatTile(icon: Icons.shield_moon_rounded, label: 'Master ration', value: fmtNum(zone.masterLimit), color: style.color, info: 'Total units a customer in this zone may order.'),
+                    StatTile(icon: Icons.shield_moon_rounded, label: '${store.currentMonth.shortLabel} entitlement', value: fmtNum(zone.monthlyTotal(store.currentMonth)), color: style.color, info: 'Total units per person this month (per-day rate × days in the month).'),
                     StatTile(icon: Icons.group_rounded, label: 'Customers', value: '${customers.length}', color: AppColors.cDairy),
-                    StatTile(icon: Icons.link_rounded, label: 'Links', value: '${links.length}', color: AppColors.accent),
+                    StatTile(icon: Icons.link_rounded, label: 'Demands', value: '${links.length}', color: AppColors.accent),
                     StatTile(icon: Icons.inventory_2_rounded, label: 'Units ordered', value: fmtNum(units), color: AppColors.brand),
                   ];
                   return Wrap(spacing: 12, runSpacing: 12, children: [for (final t in tiles) SizedBox(width: w, child: t)]);
@@ -253,30 +304,45 @@ class _CriteriaCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final month = store.currentMonth;
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SectionHeader(title: 'Ration criteria', subtitle: 'RIK ${zone.name} scale · caps = entitlement per day × $kRationPeriodDays (weekly)', info: 'Tap any value to edit. Changes apply live to the customer order form.'),
-          const SizedBox(height: 14),
-          _EditRow(
-            icon: Icons.shield_moon_rounded,
-            label: 'Master ration (all categories)',
-            value: '${fmtNum(zone.masterLimit)} units',
-            onTap: () => _editNumber(context, title: 'Master ration — ${zone.name}', current: zone.masterLimit, unit: 'units',
-                onSave: (v) => store.setZoneMaster(zone.name, v)),
+          SectionHeader(
+            title: 'Entitlement scale',
+            subtitle: 'RIK ${zone.name} · per-person-per-day rates. A month = rate × ${month.days} days for ${month.label}.',
+            info: 'Tap a rate to edit, or import the unit’s Excel. Every allowance — a demand or a whole month — is derived from these per-day rates.',
+            action: OutlinedButton.icon(
+              onPressed: () => _importSheet(context, store, zone),
+              icon: const Icon(Icons.upload_file_rounded, size: 18),
+              label: const Text('Import Excel'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(AppRadius.sm)),
+            child: Row(children: [
+              const Icon(Icons.info_outline_rounded, size: 15, color: AppColors.brand),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Month total per person: ${fmtNum(zone.monthlyTotal(month))} units', style: t.bodySmall)),
+            ]),
           ),
           const Divider(height: 22),
-          Text('Per-category caps', style: t.titleSmall),
+          Row(children: [
+            Expanded(child: Text('Per-category entitlement', style: t.titleSmall)),
+            Text('per day → ${month.shortLabel}', style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+          ]),
           const SizedBox(height: 6),
           for (final cat in kCategories)
             _EditRow(
               icon: cat.icon,
               iconColor: cat.color,
               label: cat.name,
-              value: fmtNum(zone.categoryLimit(cat.name)),
-              onTap: () => _editNumber(context, title: '${cat.name} cap — ${zone.name}', current: zone.categoryLimit(cat.name), unit: 'units',
-                  onSave: (v) => store.setZoneCategoryLimit(zone.name, cat.name, v)),
+              value: '${fmtNum(zone.perDayFor(cat.name))}/day · ${fmtNum(zone.monthlyAllowance(cat.name, month))}',
+              onTap: () => _editNumber(context, title: '${cat.name} per day — ${zone.name}', current: zone.perDayFor(cat.name), unit: 'per day',
+                  onSave: (v) => store.setZonePerDay(zone.name, cat.name, v)),
             ),
           const Divider(height: 22),
           Row(
@@ -309,6 +375,68 @@ class _CriteriaCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Import the unit's entitlement Excel and apply it to this zone's per-day
+  /// scale. Unmatched categories are reported, not silently dropped.
+  Future<void> _importSheet(BuildContext context, AppStore store, RationZone zone) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final file = await pickStockFile();
+    if (file == null) return;
+    final result = parseEntitlementFile(file.name, file.bytes);
+    if (!context.mounted) return;
+
+    final valid = result.valid;
+    if (valid.isEmpty) {
+      final why = result.warnings.isNotEmpty ? result.warnings.first : 'No entitlement rows recognised.';
+      messenger.showSnackBar(SnackBar(content: Text(why)));
+      return;
+    }
+
+    final apply = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Apply to ${zone.name}?'),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${valid.length} categories recognised from ${file.name}:'),
+              const SizedBox(height: 10),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final r in valid)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text('• ${r.category} — ${fmtNum(r.perDay)}/day', style: Theme.of(ctx).textTheme.bodySmall),
+                        ),
+                      for (final w in result.warnings)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(w, style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: AppColors.warning)),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Apply')),
+        ],
+      ),
+    );
+    if (apply == true) {
+      final summary = store.importEntitlement(zone.name, valid);
+      messenger.showSnackBar(SnackBar(content: Text('Updated ${summary.updated} categories for ${zone.name}')));
+    }
   }
 
   Future<void> _addItemMax(BuildContext context, AppStore store, RationZone zone) async {
@@ -444,20 +572,19 @@ class _ZoneLinksCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SectionHeader(
-            title: 'Order links',
-            subtitle: 'Ration links scoped to this zone',
+            title: 'Demands',
+            subtitle: 'Fresh & dry demands scoped to this zone',
             action: FilledButton.icon(
-              onPressed: () {
-                final c = store.openNewCycle(designation: zoneName, closeOthers: false);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${c.title} link generated')));
-              },
-              icon: const Icon(Icons.add_link_rounded, size: 18),
-              label: const Text('New link'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => DemandBuilderScreen(zone: zoneName)),
+              ),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Raise demand'),
             ),
           ),
           const SizedBox(height: 12),
           if (links.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: EmptyState(icon: Icons.link_off_rounded, title: 'No links for this zone'))
+            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: EmptyState(icon: Icons.link_off_rounded, title: 'No demands for this zone'))
           else
             ...links.map((c) {
               final open = c.status == CycleStatus.open;

@@ -439,7 +439,9 @@ class _HomeTab extends StatelessWidget {
               const SizedBox(height: 14),
               _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
               const SizedBox(height: 14),
-              _AvailableItemsCard(store: store, onOrderNow: onOrderNow),
+              _MyBalanceCard(store: store, name: name, phone: phone, designation: designation),
+              const SizedBox(height: 14),
+              _AvailableItemsCard(store: store, designation: designation, onOrderNow: onOrderNow),
               const SizedBox(height: 14),
               _CustomerActivityCard(store: store, orders: myOrders, accountSince: accountSince),
               if (myOrders.isEmpty) ...[
@@ -539,8 +541,8 @@ class _OrderStatusCard extends StatelessWidget {
     final windows = store.openCyclesFor(designation);
     final open = windows.isNotEmpty && store.items.isNotEmpty;
     final multi = windows.length > 1;
-    final cycle = windows.isNotEmpty ? windows.first : store.orderingCycle;
-    final closeLine = DateFormat('d MMM').format(cycle.weekEnd);
+    final cycle = windows.isNotEmpty ? windows.first : null;
+    final closeLine = cycle != null ? DateFormat('d MMM').format(cycle.weekEnd) : '';
 
     final dark = Theme.of(context).brightness == Brightness.dark;
     final colors = open
@@ -569,24 +571,31 @@ class _OrderStatusCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                open
-                    ? (multi ? 'LIVE · ${windows.length} windows open' : 'LIVE · ${cycle.title}')
-                    : '${cycle.title.isEmpty ? 'Ordering' : cycle.title} · CLOSED',
-                style: t.labelMedium?.copyWith(color: Colors.white.withValues(alpha: 0.92), letterSpacing: 1.1, fontWeight: FontWeight.w700),
+              Expanded(
+                child: Text(
+                  open
+                      ? (multi ? 'LIVE · ${windows.length} demands open' : 'LIVE · ${cycle!.title}')
+                      : 'DEMAND NOT STARTED',
+                  style: t.labelMedium?.copyWith(color: Colors.white.withValues(alpha: 0.92), letterSpacing: 1.1, fontWeight: FontWeight.w700),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
-            open ? (multi ? '${windows.length} order windows open' : 'Order window is open') : 'Order window is closed',
+            open
+                ? (multi ? '${windows.length} demands are open' : '${cycle!.type.label} ration demand is open')
+                : 'Demand acceptance has not started yet',
             style: t.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
           Text(
             open
-                ? (multi ? 'Pick a window on the Order tab before it closes' : 'Closes $closeLine, 11:59 PM')
-                : "This week's ordering has closed. You'll be notified when the next window opens.",
+                ? (multi
+                    ? 'Pick a demand on the Order tab before it closes'
+                    : 'Covers ${cycle!.days} days · closes $closeLine, 11:59 PM')
+                : "The unit hasn't opened the demand yet. You'll be notified the moment it does — your balance below is still yours.",
             style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.88)),
           ),
           if (open) ...[
@@ -596,10 +605,77 @@ class _OrderStatusCard extends StatelessWidget {
               child: FilledButton(
                 style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: AppColors.brandDark),
                 onPressed: onOrderNow,
-                child: const Text('Place order'),
+                child: const Text('Place demand'),
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// **What is still due to the customer this month** — the balance, per category.
+///
+/// This is deliberately on the home page and not gated behind an open demand:
+/// someone who was away on leave and comes back in the fourth week must be able
+/// to see the quantity still balanced with them. Because they ordered nothing,
+/// their consumed is zero and they simply see their entitlement in full.
+class _MyBalanceCard extends StatelessWidget {
+  final AppStore store;
+  final String name;
+  final String phone;
+  final String designation;
+  const _MyBalanceCard({required this.store, required this.name, required this.phone, required this.designation});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+
+    // Show the month the open demand spends from; otherwise the current month.
+    final open = store.openCyclesFor(designation);
+    final month = open.isNotEmpty ? open.first.month : store.currentMonth;
+
+    final all = store.balancesFor(name: name, phone: phone, zone: designation, month: month);
+    final balances = all.where((b) => b.total > 0).toList()
+      ..sort((a, b) => b.remaining.compareTo(a.remaining));
+    if (balances.isEmpty) return const SizedBox.shrink();
+
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.account_balance_wallet_rounded, size: 20, color: scheme.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Balance left with you', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    Text('Your ${month.label} entitlement', style: t.bodySmall),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          BalanceSummaryCard(month: month, balances: balances, zoneLabel: designation),
+          const SizedBox(height: 14),
+          ...balances.map((b) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: CategoryBalanceBar(category: categoryOf(b.category), balance: b),
+              )),
         ],
       ),
     );
@@ -941,14 +1017,24 @@ class _LastOrderStrip extends StatelessWidget {
 
 class _AvailableItemsCard extends StatelessWidget {
   final AppStore store;
+  final String designation;
   final VoidCallback onOrderNow;
-  const _AvailableItemsCard({required this.store, required this.onOrderNow});
+  const _AvailableItemsCard({required this.store, required this.designation, required this.onOrderNow});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final available = [...store.items]..sort((a, b) => a.name.compareTo(b.name));
+
+    // Only what the unit has actually added to the open demand — the customer
+    // never sees items that aren't on the current demand list.
+    final open = store.openCyclesFor(designation);
+    if (open.isEmpty) return const SizedBox.shrink();
+    final available = [for (final c in open) ...store.itemsForCycle(c)]
+        .fold<Map<String, Item>>({}, (m, i) => m..putIfAbsent(i.id, () => i))
+        .values
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
     if (available.isEmpty) return const SizedBox.shrink();
 
     final preview = available.take(10).toList();

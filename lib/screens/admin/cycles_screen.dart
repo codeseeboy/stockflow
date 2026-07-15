@@ -6,9 +6,10 @@ import '../../data/app_store.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/ui_kit.dart';
+import 'demand_builder_screen.dart';
 import 'link_detail_screen.dart';
 
-/// Neat, scannable list of every ration link. Each row opens a full management
+/// Neat, scannable list of every demand. Each row opens a full management
 /// page ([LinkDetailScreen]).
 class CyclesScreen extends StatelessWidget {
   const CyclesScreen({super.key});
@@ -18,44 +19,10 @@ class CyclesScreen extends StatelessWidget {
     return '${f.format(c.weekStart)} – ${f.format(c.weekEnd)}, ${c.weekEnd.year}';
   }
 
-  /// Prompt for an optional zone, then open a new link alongside any already
-  /// live (several links can be open at once).
-  void _newLink(BuildContext context, AppStore store) {
-    String? zone = '';
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('New order link'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Scope the link to a zone, or leave it open to everyone. Existing open links stay live.'),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              initialValue: '',
-              decoration: const InputDecoration(labelText: 'Zone', prefixIcon: Icon(Icons.shield_moon_outlined)),
-              items: [
-                const DropdownMenuItem(value: '', child: Text('All zones (everyone)')),
-                for (final z in store.zoneNames) DropdownMenuItem(value: z, child: Text(z)),
-              ],
-              onChanged: (v) => zone = v,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              final c = store.openNewCycle(designation: zone ?? '', closeOthers: false);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${c.title} link generated')));
-            },
-            child: const Text('Generate link'),
-          ),
-        ],
-      ),
-    );
+  /// Open the demand builder — pick fresh/dry, zone, month, days and the
+  /// varieties to put on the list.
+  void _newDemand(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DemandBuilderScreen()));
   }
 
   @override
@@ -75,12 +42,12 @@ class CyclesScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SectionHeader(
-                title: 'Order links',
-                subtitle: 'Every ration link — tap one to manage it',
+                title: 'Demands',
+                subtitle: 'Every fresh & dry demand — tap one to manage it',
                 action: FilledButton.icon(
-                  onPressed: () => _newLink(context, store),
-                  icon: const Icon(Icons.add_link_rounded, size: 18),
-                  label: const Text('New link'),
+                  onPressed: () => _newDemand(context),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Raise demand'),
                 ),
               ),
               const SizedBox(height: 20),
@@ -93,14 +60,14 @@ class CyclesScreen extends StatelessWidget {
               ]),
               const SizedBox(height: 10),
               if (live.isEmpty)
-                const EmptyState(icon: Icons.link_off_rounded, title: 'No live links', subtitle: 'Generate a link to open ordering.')
+                const EmptyState(icon: Icons.link_off_rounded, title: 'No live demands', subtitle: 'Raise a demand to start accepting orders.')
               else
                 ...live.map((c) => _LinkRow(store: store, cycle: c, range: _range(c))),
               const SizedBox(height: 24),
-              Text('Past links', style: t.titleMedium),
+              Text('Past demands', style: t.titleMedium),
               const SizedBox(height: 10),
               if (past.isEmpty)
-                const EmptyState(icon: Icons.history_rounded, title: 'No past links yet')
+                const EmptyState(icon: Icons.history_rounded, title: 'No past demands yet')
               else
                 ...past.map((c) => _LinkRow(store: store, cycle: c, range: _range(c))),
               const SizedBox(height: 24),
@@ -125,6 +92,7 @@ class _LinkRow extends StatelessWidget {
     final open = cycle.status == CycleStatus.open;
     final count = store.orders.where((o) => o.cycleId == cycle.id).length;
     final zoneLabel = cycle.isPublic ? 'All zones' : cycle.designation;
+    final fresh = cycle.type == DemandType.fresh;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -149,7 +117,8 @@ class _LinkRow extends StatelessWidget {
                   Text(range, style: t.bodySmall),
                   const SizedBox(height: 6),
                   Wrap(spacing: 6, runSpacing: 6, children: [
-                    Pill(zoneLabel, color: AppColors.accent, icon: Icons.shield_moon_rounded),
+                    Pill('${cycle.type.label} · ${cycle.days}d', color: fresh ? AppColors.success : AppColors.accent, icon: fresh ? Icons.eco_rounded : Icons.grain_rounded),
+                    Pill(zoneLabel, color: AppColors.brand, icon: Icons.shield_moon_rounded),
                     Pill('$count orders', color: AppColors.cDairy, icon: Icons.receipt_long_rounded),
                   ]),
                 ],

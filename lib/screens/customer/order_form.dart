@@ -31,7 +31,13 @@ double _stepFor(double cap, String unit) {
   return best;
 }
 
-/// Weekly order form: pick items + quantities, review a summary, then confirm.
+/// The demand form: the customer picks quantities against **their own remaining
+/// entitlement** — never against warehouse stock.
+///
+/// Everything on this page is bounded by the balance for the demand's month:
+/// `allowance + carried-in − already ordered`. So a customer who was on leave
+/// and ordered nothing sees their entitlement in full, and one who took bread on
+/// an earlier fresh demand finds that much already gone from Cereals.
 class OrderForm extends StatefulWidget {
   final String name;
   final String phone;
@@ -53,7 +59,20 @@ class _OrderFormState extends State<OrderForm> {
   double get _units => _picked.values.fold(0.0, (s, v) => s + v);
 
   /// The customer's ration zone (entitlement criteria), set each build.
-  RationZone _zone = kRationZones.first;
+  RationZone _zone = kOfficersZone;
+
+  /// The customer's balance per category for the demand's month, set each build.
+  Map<String, CategoryBalance> _balances = const {};
+
+  CategoryBalance _balanceOf(String category) =>
+      _balances[category] ??
+      CategoryBalance(
+        category: category,
+        unit: rikCategoryByName(category)?.unit ?? 'kg',
+        allowance: 0,
+        carriedIn: 0,
+        consumed: 0,
+      );
 
   /// Quantity already picked across all items in [cat].
   double _pickedInCategory(String cat) {
@@ -67,18 +86,13 @@ class _OrderFormState extends State<OrderForm> {
     return sum;
   }
 
-  /// Total ration points used so far (sum of all picked quantities).
-  double get _masterUsed => _picked.values.fold(0.0, (s, v) => s + v);
-
-  /// The most this item may still reach, bounded by the master ration cap, the
-  /// item's category cap, and any per-item maximum for the zone.
+  /// The most this item may still reach: what's left of the category's balance
+  /// for the month, less what's already in the cart, and any per-item maximum.
   double _capForItem(Item item) {
     final picked = _picked[item.id] ?? 0;
-    final masterHead = _zone.masterLimit - _masterUsed + picked;
-    final catHead = _zone.categoryLimit(item.category) - _pickedInCategory(item.category) + picked;
+    final head = _balanceOf(item.category).remaining - _pickedInCategory(item.category) + picked;
     final itemMax = _zone.maxForItem(item.name);
-    var cap = masterHead;
-    if (catHead < cap) cap = catHead;
+    var cap = head;
     if (itemMax < cap) cap = itemMax;
     return cap < 0 ? 0 : cap;
   }
@@ -89,32 +103,31 @@ class _OrderFormState extends State<OrderForm> {
     return m.isFinite ? 'Max ${fmtNum(m)} ${item.unit}' : '';
   }
 
-  /// Add/remove increment for an item, sized to its category entitlement.
-  double _stepForItem(Item item) => _stepFor(_zone.categoryLimit(item.category), item.unit);
+  /// Add/remove increment for an item, sized to its monthly entitlement.
+  double _stepForItem(Item item) => _stepFor(_balanceOf(item.category).total, item.unit);
 
   bool _isInLieu(Item item) => isInLieuArticle(item.name);
 
-  void _setQty(Item item, double qty) {
+  void _setQty(Item item, double qty, RationMonth month) {
     setState(() {
       var next = qty < 0 ? 0.0 : qty;
       final picked = _picked[item.id] ?? 0;
-      final masterHead = _zone.masterLimit - _masterUsed + picked;
-      final catHead = _zone.categoryLimit(item.category) - _pickedInCategory(item.category) + picked;
+      final bal = _balanceOf(item.category);
+      final head = bal.remaining - _pickedInCategory(item.category) + picked;
       final itemMax = _zone.maxForItem(item.name);
-      var cap = masterHead;
-      if (catHead < cap) cap = catHead;
+      var cap = head;
       if (itemMax < cap) cap = itemMax;
       if (cap < 0) cap = 0;
 
       if (next > cap) {
         next = cap;
         final String msg;
-        if (cap == itemMax) {
+        if (itemMax <= head) {
           msg = 'Max ${fmtNum(itemMax)} ${item.unit} of ${item.name} for your zone';
-        } else if (cap == catHead) {
-          msg = '${item.category} ration limit reached';
+        } else if (cap <= 0) {
+          msg = 'Your ${item.category} entitlement for ${month.label} is used up';
         } else {
-          msg = 'Master ration limit reached';
+          msg = 'Only ${fmtQty(cap, bal.unit)} of ${item.category} left in your ${month.label} balance';
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(duration: const Duration(seconds: 2), content: Text(msg)),
@@ -137,9 +150,10 @@ class _OrderFormState extends State<OrderForm> {
     // Drop only items that no longer exist — stock never removes an item.
     _picked.removeWhere((id, qty) => !store.items.any((i) => i.id == id));
 
-    // Open ration links this customer (by zone) may order in.
+    // Open demands this customer (by zone) may order in. Until the unit opens
+    // one, there is no demand page at all.
     final windows = store.openCyclesFor(widget.designation);
-    if (windows.isEmpty || store.items.isEmpty) return const _NoOrderState();
+    if (windows.isEmpty) return const DemandNotStarted();
 
     final orderedIds = customerOrdersFor(store, widget.name, widget.phone)
         .map((o) => o.cycleId)
@@ -156,15 +170,34 @@ class _OrderFormState extends State<OrderForm> {
     );
     final alreadyOrdered = orderedIds.contains(cycle.id);
 
-    // Single window already used → full-screen "closed for you" state.
-    if (windows.length == 1 && alreadyOrdered) return _AlreadyOrderedState(cycle: cycle);
+    // Only the varieties the admin added to this demand — "if I am not adding
+    // it, the customer will not see it".
+    final onDemand = store.itemsForCycle(cycle);
+    if (onDemand.isEmpty) return _EmptyDemandState(cycle: cycle);
 
-    final matches = store.items.where((i) {
+    // The balance this demand spends from — its entitlement month.
+    _balances = {
+      for (final b in store.balancesFor(
+        name: widget.name,
+        phone: widget.phone,
+        zone: widget.designation,
+        month: cycle.month,
+      ))
+        b.category: b,
+    };
+
+    // Single window already used → full-screen "closed for you" state.
+    if (windows.length == 1 && alreadyOrdered) {
+      return _AlreadyOrderedState(cycle: cycle, balances: _orderedBalances(onDemand));
+    }
+
+    final matches = onDemand.where((i) {
       final mq = _query.isEmpty || i.name.toLowerCase().contains(_query.toLowerCase());
       final mc = _category == 'All' || i.category == _category;
       return mq && mc;
     }).toList();
     final grouped = _category == 'All' && _query.isEmpty;
+    final cats = _categoriesOnDemand(onDemand);
 
     return Column(
       children: [
@@ -182,39 +215,51 @@ class _OrderFormState extends State<OrderForm> {
                         windows: windows,
                         selectedId: cycle.id,
                         orderedIds: orderedIds,
-                        onSelect: (id) => setState(() => _selectedCycleId = id),
+                        onSelect: (id) => setState(() {
+                          _selectedCycleId = id;
+                          _picked.clear();
+                        }),
                       ),
                       const SizedBox(height: 14),
                     ],
                     if (alreadyOrdered)
                       _AlreadyOrderedInline(cycle: cycle)
                     else ...[
-                      _MasterRationBar(used: _masterUsed, limit: _zone.masterLimit, level: _zone.level),
+                      BalanceSummaryCard(
+                        month: cycle.month,
+                        balances: _orderedBalances(onDemand),
+                        picked: _pickedByCategory(),
+                        zoneLabel: _zone.level,
+                      ),
                       const SizedBox(height: 12),
-                      _DateBanner(cycle: cycle),
+                      _DemandBanner(cycle: cycle),
                       const SizedBox(height: 14),
                       TextField(
                         onChanged: (v) => setState(() => _query = v),
                         decoration: const InputDecoration(hintText: 'Search items…', prefixIcon: Icon(Icons.search_rounded)),
                       ),
                       const SizedBox(height: 12),
-                      _Categories(selected: _category, onSelect: (c) => setState(() => _category = c)),
+                      _Categories(
+                        names: cats,
+                        selected: _category,
+                        onSelect: (c) => setState(() => _category = c),
+                      ),
                       const SizedBox(height: 16),
                       if (matches.isEmpty)
                         const Padding(padding: EdgeInsets.only(top: 36), child: EmptyState(icon: Icons.search_off_rounded, title: 'Nothing matches'))
                       else if (grouped)
-                        ..._sections(store, matches)
+                        ..._sections(matches, cycle.month)
                       else ...[
                         if (_category != 'All')
                           Padding(
                             padding: const EdgeInsets.only(bottom: 10),
-                            child: _CategoryQuotaBar(
+                            child: CategoryBalanceBar(
                               category: categoryOf(_category),
+                              balance: _balanceOf(_category),
                               picked: _pickedInCategory(_category),
-                              quota: _zone.categoryLimit(_category),
                             ),
                           ),
-                        _grid(matches),
+                        _grid(matches, cycle.month),
                       ],
                       const SizedBox(height: 8),
                     ],
@@ -224,12 +269,37 @@ class _OrderFormState extends State<OrderForm> {
             ),
           ),
         ),
-        if (!alreadyOrdered && _count > 0) _SubmitBar(count: _count, units: _units, onReview: () => _openReview(store, cycle)),
+        if (!alreadyOrdered && _count > 0)
+          _SubmitBar(count: _count, units: _units, onReview: () => _openReview(store, cycle)),
       ],
     );
   }
 
-  List<Widget> _sections(AppStore store, List<Item> items) {
+  /// Balances for the categories that actually appear on this demand, in the
+  /// catalogue's order.
+  List<CategoryBalance> _orderedBalances(List<Item> onDemand) {
+    final names = _categoriesOnDemand(onDemand).skip(1); // drop 'All'
+    return [for (final n in names) _balanceOf(n)];
+  }
+
+  /// 'All' + every category with an item on this demand.
+  List<String> _categoriesOnDemand(List<Item> onDemand) {
+    final present = onDemand.map((i) => i.category).toSet();
+    return ['All', for (final c in kCategories) if (present.contains(c.name)) c.name];
+  }
+
+  Map<String, double> _pickedByCategory() {
+    final store = _storeRef;
+    final out = <String, double>{};
+    if (store == null) return out;
+    _picked.forEach((id, q) {
+      final it = store.items.where((i) => i.id == id);
+      if (it.isNotEmpty) out[it.first.category] = (out[it.first.category] ?? 0) + q;
+    });
+    return out;
+  }
+
+  List<Widget> _sections(List<Item> items, RationMonth month) {
     final out = <Widget>[];
     for (final cat in kCategories) {
       final inCat = items.where((i) => i.category == cat.name).toList();
@@ -242,19 +312,19 @@ class _OrderFormState extends State<OrderForm> {
           Text(cat.name, style: Theme.of(context).textTheme.titleMedium),
         ]),
       ));
-      out.add(_CategoryQuotaBar(
+      out.add(CategoryBalanceBar(
         category: cat,
+        balance: _balanceOf(cat.name),
         picked: _pickedInCategory(cat.name),
-        quota: _zone.categoryLimit(cat.name),
       ));
       out.add(const SizedBox(height: 10));
-      out.add(_grid(inCat));
+      out.add(_grid(inCat, month));
       out.add(const SizedBox(height: 18));
     }
     return out;
   }
 
-  Widget _grid(List<Item> items) {
+  Widget _grid(List<Item> items, RationMonth month) {
     return LayoutBuilder(builder: (context, c) {
       final cols = (c.maxWidth / 172).floor().clamp(2, 7);
       final w = (c.maxWidth - (cols - 1) * 12) / cols;
@@ -272,7 +342,7 @@ class _OrderFormState extends State<OrderForm> {
                 maxLabel: _maxLabelFor(item),
                 step: _stepForItem(item),
                 inLieu: _isInLieu(item),
-                onChanged: (q) => _setQty(item, q),
+                onChanged: (q) => _setQty(item, q, month),
               ),
             ),
         ],
@@ -289,9 +359,10 @@ class _OrderFormState extends State<OrderForm> {
         picked: _picked,
         store: store,
         name: widget.name,
+        cycle: cycle,
         capFor: _capForItem,
         stepFor: _stepForItem,
-        onChange: (item, q) => _setQty(item, q),
+        onChange: (item, q) => _setQty(item, q, cycle.month),
         onConfirm: () => _placeOrder(store, cycle),
       ),
     );
@@ -299,7 +370,13 @@ class _OrderFormState extends State<OrderForm> {
 
   void _placeOrder(AppStore store, OrderCycle cycle) {
     try {
-      final order = store.placeOrder(customerName: widget.name, customerPhone: widget.phone, cart: Map.of(_picked), cycleId: cycle.id);
+      final order = store.placeOrder(
+        customerName: widget.name,
+        customerPhone: widget.phone,
+        cart: Map.of(_picked),
+        cycleId: cycle.id,
+        zone: widget.designation,
+      );
       setState(() => _picked.clear());
       Navigator.pop(context); // review sheet
       showDialog(context: context, builder: (_) => _SuccessDialog(orderId: order.id, items: order.itemCount));
@@ -311,31 +388,10 @@ class _OrderFormState extends State<OrderForm> {
   }
 }
 
-class _NoOrderState extends StatelessWidget {
-  const _NoOrderState();
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 76, height: 76, decoration: BoxDecoration(color: AppColors.brandWash, borderRadius: BorderRadius.circular(AppRadius.xl)), child: const Icon(Icons.event_busy_rounded, size: 36, color: AppColors.brand)),
-          const SizedBox(height: 18),
-          Text('No order link is open right now', style: t.titleLarge, textAlign: TextAlign.center),
-          const SizedBox(height: 6),
-          Text("You'll be notified the moment this week's order link goes live.", textAlign: TextAlign.center, style: t.bodyMedium),
-        ]),
-      ),
-    );
-  }
-}
-
-/// Shown after a customer has already placed their order for the open cycle —
-/// the link is closed for them until the next window.
-class _AlreadyOrderedState extends StatelessWidget {
-  final OrderCycle cycle;
-  const _AlreadyOrderedState({required this.cycle});
+/// Shown until the unit opens a demand. The unit announces it in the group —
+/// "we are ready to accept the demand" — and only then does the page appear.
+class DemandNotStarted extends StatelessWidget {
+  const DemandNotStarted({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -347,14 +403,14 @@ class _AlreadyOrderedState extends StatelessWidget {
           Container(
             width: 76,
             height: 76,
-            decoration: BoxDecoration(color: AppColors.successWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
-            child: const Icon(Icons.verified_rounded, size: 38, color: AppColors.success),
+            decoration: BoxDecoration(color: AppColors.brandWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
+            child: const Icon(Icons.hourglass_empty_rounded, size: 36, color: AppColors.brand),
           ),
           const SizedBox(height: 18),
-          Text("You've ordered for ${cycle.title}", style: t.titleLarge, textAlign: TextAlign.center),
+          Text('Demand acceptance has not started yet', style: t.titleLarge, textAlign: TextAlign.center),
           const SizedBox(height: 6),
           Text(
-            'The order link is now closed for you this week. Check it under My Orders — the link reopens with the next window.',
+            'The unit has not opened the demand. You’ll be notified the moment it starts — then this page will let you place your demand.',
             textAlign: TextAlign.center,
             style: t.bodyMedium,
           ),
@@ -364,9 +420,83 @@ class _AlreadyOrderedState extends StatelessWidget {
   }
 }
 
-/// Horizontal chips to switch between the open order windows a customer can use
-/// (two windows in a week, and/or designation-scoped links). Already-ordered
-/// windows show a check.
+/// The demand is open but the admin hasn't added any varieties to it yet.
+class _EmptyDemandState extends StatelessWidget {
+  final OrderCycle cycle;
+  const _EmptyDemandState({required this.cycle});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(color: AppColors.brandWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
+            child: const Icon(Icons.playlist_add_rounded, size: 36, color: AppColors.brand),
+          ),
+          const SizedBox(height: 18),
+          Text('${cycle.title} is being prepared', style: t.titleLarge, textAlign: TextAlign.center),
+          const SizedBox(height: 6),
+          Text('The unit has not added any items to this demand yet. Check back shortly.',
+              textAlign: TextAlign.center, style: t.bodyMedium),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Shown after a customer has placed their demand for the open cycle. Their
+/// balance stays visible — what's still due to them for the month.
+class _AlreadyOrderedState extends StatelessWidget {
+  final OrderCycle cycle;
+  final List<CategoryBalance> balances;
+  const _AlreadyOrderedState({required this.cycle, required this.balances});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Column(children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(color: AppColors.successWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
+              child: const Icon(Icons.verified_rounded, size: 38, color: AppColors.success),
+            ),
+            const SizedBox(height: 18),
+            Text("You've placed your demand for ${cycle.title}", style: t.titleLarge, textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(
+              'This demand is now closed for you. Below is what is still due to you for ${cycle.month.label} — it carries into the next demand.',
+              textAlign: TextAlign.center,
+              style: t.bodyMedium,
+            ),
+            const SizedBox(height: 20),
+            BalanceSummaryCard(
+              month: cycle.month,
+              balances: balances,
+              picked: const {},
+              zoneLabel: cycle.isPublic ? '' : cycle.designation,
+            ),
+            const SizedBox(height: 20),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Horizontal chips to switch between the open demands a customer can use.
+/// Already-ordered demands show a check.
 class _WindowSelector extends StatelessWidget {
   final List<OrderCycle> windows;
   final String selectedId;
@@ -384,7 +514,7 @@ class _WindowSelector extends StatelessWidget {
         Row(children: [
           const Icon(Icons.event_available_rounded, size: 16, color: AppColors.brand),
           const SizedBox(width: 6),
-          Text('Choose an order window', style: t.titleSmall),
+          Text('Choose a demand', style: t.titleSmall),
         ]),
         const SizedBox(height: 8),
         SingleChildScrollView(
@@ -399,8 +529,8 @@ class _WindowSelector extends StatelessWidget {
                     onSelected: (_) => onSelect(w.id),
                     avatar: orderedIds.contains(w.id)
                         ? const Icon(Icons.check_circle_rounded, size: 16, color: AppColors.success)
-                        : (w.isPublic ? null : const Icon(Icons.badge_outlined, size: 16)),
-                    label: Text(w.title.replaceFirst('Week ', 'Wk ')),
+                        : Icon(w.type == DemandType.fresh ? Icons.eco_rounded : Icons.grain_rounded, size: 16),
+                    label: Text(w.title),
                     selectedColor: AppColors.brandWash,
                     labelStyle: TextStyle(fontWeight: FontWeight.w600, color: w.id == selectedId ? AppColors.brandDark : null),
                     shape: const StadiumBorder(),
@@ -415,8 +545,8 @@ class _WindowSelector extends StatelessWidget {
   }
 }
 
-/// Compact "you've ordered in this window" banner shown when more than one
-/// window is open, so the selector stays visible to switch to another.
+/// Compact "you've ordered in this demand" banner shown when more than one
+/// demand is open, so the selector stays visible to switch to another.
 class _AlreadyOrderedInline extends StatelessWidget {
   final OrderCycle cycle;
   const _AlreadyOrderedInline({required this.cycle});
@@ -440,9 +570,9 @@ class _AlreadyOrderedInline extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("You've ordered for ${cycle.title}", style: t.titleSmall),
+                Text("You've placed your demand for ${cycle.title}", style: t.titleSmall),
                 const SizedBox(height: 4),
-                Text('This window is closed for you. Pick another open window above, or check My Orders.', style: t.bodySmall),
+                Text('This demand is closed for you. Pick another open demand above, or check My Orders.', style: t.bodySmall),
               ],
             ),
           ),
@@ -452,54 +582,87 @@ class _AlreadyOrderedInline extends StatelessWidget {
   }
 }
 
-/// The prominent master ration bar — total entitlement used across all food
-/// categories for the customer's zone. When it fills, nothing more can be added.
-class _MasterRationBar extends StatelessWidget {
-  final double used;
-  final double limit;
-  final String level;
-  const _MasterRationBar({required this.used, required this.limit, required this.level});
+/// The headline card: **what is left with the customer** for the month — not
+/// what is in the warehouse. Shows the month's entitlement, anything carried in
+/// from last month, and what is still due.
+class BalanceSummaryCard extends StatelessWidget {
+  final RationMonth month;
+  final List<CategoryBalance> balances;
+  final Map<String, double> picked;
+  final String zoneLabel;
+
+  const BalanceSummaryCard({
+    super.key,
+    required this.month,
+    required this.balances,
+    this.picked = const {},
+    this.zoneLabel = '',
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final ratio = limit <= 0 ? 0.0 : (used / limit).clamp(0.0, 1.0);
-    final full = used >= limit - 0.0001;
-    final color = full ? AppColors.warning : AppColors.brand;
+    if (balances.isEmpty) return const SizedBox.shrink();
+
+    final carried = balances.fold<double>(0, (s, b) => s + b.carriedIn);
+    final inCart = picked.values.fold<double>(0, (s, v) => s + v);
+    final remaining = balances.fold<double>(0, (s, b) => s + b.remaining) - inCart;
+    final total = balances.fold<double>(0, (s, b) => s + b.total);
+    final ratio = total <= 0 ? 0.0 : (remaining / total).clamp(0.0, 1.0);
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: scheme.surface,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: color.withValues(alpha: 0.45)),
+        border: Border.all(color: AppColors.brand.withValues(alpha: 0.45)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.shield_moon_rounded, size: 18, color: color),
+              const Icon(Icons.account_balance_wallet_rounded, size: 18, color: AppColors.brand),
               const SizedBox(width: 8),
-              Text('Your ration · $level zone', style: t.titleSmall),
-              const Spacer(),
-              Text('${fmtNum(used)} / ${fmtNum(limit)}', style: t.titleSmall?.copyWith(color: color, fontWeight: FontWeight.w800)),
+              Expanded(
+                child: Text(
+                  zoneLabel.isEmpty
+                      ? 'Balance left with you · ${month.label}'
+                      : 'Balance left with you · ${month.label} · $zoneLabel',
+                  style: t.titleSmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: TweenAnimationBuilder<double>(
               tween: Tween(begin: 0, end: ratio),
               duration: const Duration(milliseconds: 320),
               curve: Curves.easeOut,
-              builder: (_, v, _) => LinearProgressIndicator(value: v, minHeight: 10, color: color, backgroundColor: scheme.surfaceContainerHighest),
+              builder: (_, v, _) => LinearProgressIndicator(
+                value: v,
+                minHeight: 10,
+                color: AppColors.brand,
+                backgroundColor: scheme.surfaceContainerHighest,
+              ),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            Pill('${fmtNum(remaining)} left', color: AppColors.brand, icon: Icons.savings_rounded),
+            if (carried > 0)
+              Pill('${fmtNum(carried)} carried from ${month.previous.shortLabel}',
+                  color: AppColors.accent, icon: Icons.move_up_rounded),
+            if (inCart > 0) Pill('${fmtNum(inCart)} in this demand', color: AppColors.cDairy, icon: Icons.shopping_basket_rounded),
+          ]),
+          const SizedBox(height: 8),
           Text(
-            full ? 'Master ration full — remove an item to add another' : 'RIK $level entitlement · your full ration for this week',
-            style: t.bodySmall?.copyWith(color: full ? AppColors.warning : scheme.onSurfaceVariant),
+            'This is your own entitlement — what is still due to you this month, not the store’s stock.',
+            style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -507,34 +670,50 @@ class _MasterRationBar extends StatelessWidget {
   }
 }
 
-/// Per-category ration bar with an animated progress fill. Shown above each
-/// category while ordering so the customer sees how much of their allowance is
-/// left (rule-based limit enforced in [_OrderFormState._setQty]).
-class _CategoryQuotaBar extends StatelessWidget {
+/// Per-category balance bar: how much of this category is still due to the
+/// customer this month, and how much of it this demand is about to use.
+class CategoryBalanceBar extends StatelessWidget {
   final Category category;
+  final CategoryBalance balance;
   final double picked;
-  final double quota;
-  const _CategoryQuotaBar({required this.category, required this.picked, required this.quota});
+  const CategoryBalanceBar({super.key, required this.category, required this.balance, this.picked = 0});
 
   @override
   Widget build(BuildContext context) {
-    if (quota <= 0) return const SizedBox.shrink();
+    if (balance.total <= 0) return const SizedBox.shrink();
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final ratio = (picked / quota).clamp(0.0, 1.0);
-    final full = picked >= quota - 0.0001;
-    final color = full ? AppColors.warning : category.color;
+
+    final left = (balance.remaining - picked).clamp(0.0, double.infinity);
+    final ratio = (left / balance.total).clamp(0.0, 1.0);
+    final empty = left <= 1e-9;
+    final color = empty ? AppColors.warning : category.color;
+
+    final detail = <String>[
+      '${fmtNum(balance.allowance)} for ${balance.unit == 'nos' ? 'the month' : 'the month'}',
+      if (balance.carriedIn > 0) '+${fmtNum(balance.carriedIn)} carried',
+      if (balance.consumed > 0) '−${fmtNum(balance.consumed)} taken',
+    ].join(' · ');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text(
-              full ? '${category.name} ration full' : '${category.name} ration',
-              style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: full ? AppColors.warning : scheme.onSurfaceVariant),
+            Expanded(
+              child: Text(
+                empty ? '${category.name} entitlement used up' : '${category.name} left with you',
+                style: t.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: empty ? AppColors.warning : scheme.onSurfaceVariant,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            const Spacer(),
-            Text('${fmtNum(picked)} / ${fmtNum(quota)}', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: color)),
+            Text(
+              '${fmtNum(left)} / ${fmtNum(balance.total)} ${balance.unit}',
+              style: t.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: color),
+            ),
           ],
         ),
         const SizedBox(height: 5),
@@ -552,23 +731,25 @@ class _CategoryQuotaBar extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 3),
+        Text(detail, style: t.bodySmall?.copyWith(fontSize: 11, color: scheme.onSurfaceVariant)),
       ],
     );
   }
 }
 
-class _DateBanner extends StatelessWidget {
+/// The demand banner: which demand this is (fresh / dry), the days it covers,
+/// and when it closes.
+class _DemandBanner extends StatelessWidget {
   final OrderCycle cycle;
-  const _DateBanner({required this.cycle});
+  const _DemandBanner({required this.cycle});
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final day = DateFormat('EEEE').format(now);
-    final date = DateFormat('d MMM yyyy').format(now);
-    final time = DateFormat('h:mm a').format(now);
-    final deadline = DateFormat('EEE, d MMM').format(cycle.weekEnd);
     final t = Theme.of(context).textTheme;
+    final fresh = cycle.type == DemandType.fresh;
+    final deadline = DateFormat('EEE, d MMM').format(cycle.weekEnd);
+    final today = DateFormat('EEEE, d MMM · h:mm a').format(DateTime.now());
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -582,15 +763,17 @@ class _DateBanner extends StatelessWidget {
             width: 46,
             height: 46,
             decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(AppRadius.md)),
-            child: const Icon(Icons.calendar_today_rounded, color: Colors.white, size: 22),
+            child: Icon(fresh ? Icons.eco_rounded : Icons.grain_rounded, color: Colors.white, size: 22),
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(day, style: t.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
-                Text('$date  ·  $time', style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
+                Text('${cycle.type.label} ration · ${cycle.days} days',
+                    style: t.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 2),
+                Text(today, style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
               ],
             ),
           ),
@@ -600,14 +783,14 @@ class _DateBanner extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(AppRadius.pill)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
                   Icon(Icons.circle, size: 8, color: Color(0xFF9DF3C7)),
                   SizedBox(width: 5),
-                  Text('Ordering open', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11)),
+                  Text('Demand open', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11)),
                 ]),
               ),
               const SizedBox(height: 6),
-              Text('Order by $deadline', style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
+              Text('Closes $deadline', style: t.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.9))),
             ],
           ),
         ],
@@ -617,13 +800,13 @@ class _DateBanner extends StatelessWidget {
 }
 
 class _Categories extends StatelessWidget {
+  final List<String> names;
   final String selected;
   final ValueChanged<String> onSelect;
-  const _Categories({required this.selected, required this.onSelect});
+  const _Categories({required this.names, required this.selected, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    final names = ['All', ...kCategories.map((c) => c.name)];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -647,8 +830,8 @@ class _Categories extends StatelessWidget {
   }
 }
 
-/// Compact product tile. No stock is shown (ration system); [maxQty] is the
-/// per-item ration cap that gates how much can be added.
+/// Compact product tile. No stock is shown (ration system); [maxQty] is what's
+/// left of the customer's own entitlement for this category.
 class _ProductTile extends StatefulWidget {
   final Item item;
   final double qty;
@@ -751,7 +934,7 @@ class _ProductTileState extends State<_ProductTile> {
                                 padding: EdgeInsets.zero,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
                               ),
-                              child: Text(atLimit ? 'LIMIT' : 'ADD', style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                              child: Text(atLimit ? 'NO BALANCE' : 'ADD', style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5, fontSize: 11.5)),
                             )
                           : _MiniStepper(
                               qty: qty,
@@ -834,7 +1017,7 @@ class _SubmitBar extends StatelessWidget {
                     ],
                   ),
                 ),
-                FilledButton.icon(onPressed: onReview, icon: const Icon(Icons.arrow_forward_rounded, size: 18), label: const Text('Review order')),
+                FilledButton.icon(onPressed: onReview, icon: const Icon(Icons.arrow_forward_rounded, size: 18), label: const Text('Review demand')),
               ],
             ),
           ),
@@ -848,11 +1031,21 @@ class _ReviewSheet extends StatefulWidget {
   final Map<String, double> picked;
   final AppStore store;
   final String name;
+  final OrderCycle cycle;
   final double Function(Item) capFor;
   final double Function(Item) stepFor;
   final void Function(Item, double) onChange;
   final VoidCallback onConfirm;
-  const _ReviewSheet({required this.picked, required this.store, required this.name, required this.capFor, required this.stepFor, required this.onChange, required this.onConfirm});
+  const _ReviewSheet({
+    required this.picked,
+    required this.store,
+    required this.name,
+    required this.cycle,
+    required this.capFor,
+    required this.stepFor,
+    required this.onChange,
+    required this.onConfirm,
+  });
 
   @override
   State<_ReviewSheet> createState() => _ReviewSheetState();
@@ -878,10 +1071,10 @@ class _ReviewSheetState extends State<_ReviewSheet> {
             Row(children: [
               const Icon(Icons.fact_check_rounded, color: AppColors.brand),
               const SizedBox(width: 8),
-              Text('Review your order', style: t.titleLarge),
+              Expanded(child: Text('Review your demand', style: t.titleLarge)),
             ]),
             const SizedBox(height: 2),
-            Text('Check the quantities, then confirm to place the order.', style: t.bodySmall),
+            Text('${widget.cycle.type.label} ration · ${widget.cycle.month.label} · comes out of your balance.', style: t.bodySmall),
             const SizedBox(height: 14),
             Expanded(
               child: lines.isEmpty
@@ -904,7 +1097,7 @@ class _ReviewSheetState extends State<_ReviewSheet> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(item.name, style: t.titleSmall),
-                                  Text('per ${item.unit}', style: t.bodySmall),
+                                  Text('${item.category} · per ${item.unit}', style: t.bodySmall),
                                 ],
                               ),
                             ),
@@ -981,11 +1174,12 @@ class _SuccessDialog extends StatelessWidget {
               child: const Icon(Icons.check_rounded, color: AppColors.success, size: 38),
             ).animate().scale(duration: 300.ms, curve: Curves.easeOutBack),
             const SizedBox(height: 18),
-            Text('Order placed!', style: t.headlineSmall),
+            Text('Demand placed!', style: t.headlineSmall),
             const SizedBox(height: 6),
             Text('$orderId · $items items', style: t.bodyMedium),
             const SizedBox(height: 4),
-            Text('Track it under My Orders. The store has been notified.', textAlign: TextAlign.center, style: t.bodySmall),
+            Text('It has come out of your entitlement — anything left stays with you for the next demand.',
+                textAlign: TextAlign.center, style: t.bodySmall),
             const SizedBox(height: 22),
             SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))),
           ],

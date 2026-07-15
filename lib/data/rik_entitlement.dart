@@ -183,12 +183,80 @@ const kRikOfficers = <RikCategory>[
   ]),
 ];
 
-/// Days in a ration ordering period (a week). Category caps = perDay × this.
-const int kRationPeriodDays = 7;
-
 RikCategory? rikCategoryByName(String name) {
   for (final c in kRikOfficers) {
     if (c.name == name) return c;
+  }
+  return null;
+}
+
+final Map<String, String> _articleToCategory = {
+  for (final c in kRikOfficers)
+    for (final a in c.articles) a.name.toLowerCase(): c.name,
+};
+
+/// The RIK category an article belongs to, by article name. Used to attribute a
+/// historic order line to a category when the item itself is no longer around.
+String? rikCategoryForArticle(String articleName) =>
+    _articleToCategory[articleName.trim().toLowerCase()];
+
+/// Match a free-text category name (from an uploaded sheet) to a RIK category.
+/// Returns null when nothing matches, so a bad row can be reported rather than
+/// silently landing in the wrong bucket.
+String? matchRikCategory(String text) {
+  final t = text.trim().toLowerCase();
+  if (t.isEmpty) return null;
+  for (final c in kRikOfficers) {
+    if (c.name.toLowerCase() == t) return c.name;
+  }
+  // Common wordings from the unit's sheets.
+  const aliases = <String, String>{
+    'cereal': 'Cereals',
+    'grain': 'Cereals',
+    'grains': 'Cereals',
+    'atta': 'Cereals',
+    'rice': 'Cereals',
+    'bread': 'Cereals',
+    'pulses': 'Dal',
+    'pulse': 'Dal',
+    'oil': 'Refined Oil',
+    'refined oil': 'Refined Oil',
+    'edible oil': 'Refined Oil',
+    'meat': 'Meat',
+    'chicken': 'Meat',
+    'mutton': 'Meat',
+    'fish': 'Meat',
+    'vegetable': 'Vegetables',
+    'vegetables': 'Vegetables',
+    'veg': 'Vegetables',
+    'fruit': 'Fruit',
+    'fruits': 'Fruit',
+    'egg': 'Eggs',
+    'eggs': 'Eggs',
+    'milk': 'Milk',
+    'tea': 'Tea/Coffee',
+    'coffee': 'Tea/Coffee',
+    'tea/coffee': 'Tea/Coffee',
+    'sugar': 'Sugar',
+    'salt': 'Salt',
+    'butter': 'Butter',
+    'potato': 'Potato',
+    'potatoes': 'Potato',
+    'onion': 'Onion',
+    'onions': 'Onion',
+    'condiment': 'Condiments',
+    'condiments': 'Condiments',
+    'spices': 'Condiments',
+    'masala': 'Condiments',
+    'dalia': 'Dalia',
+    'lpg': 'LPG',
+    'gas': 'LPG',
+  };
+  final alias = aliases[t];
+  if (alias != null) return alias;
+  for (final c in kRikOfficers) {
+    final n = c.name.toLowerCase();
+    if (n.startsWith(t) || t.startsWith(n)) return c.name;
   }
   return null;
 }

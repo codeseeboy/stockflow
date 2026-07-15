@@ -30,6 +30,8 @@ class LinkDetailScreen extends StatelessWidget {
     final range = '${DateFormat('d MMM').format(cycle.weekStart)} – ${DateFormat('d MMM yyyy').format(cycle.weekEnd)}';
     final units = orders.fold<double>(0, (s, o) => s + o.totalUnits);
     final zoneLabel = cycle.isPublic ? 'All zones' : cycle.designation;
+    final fresh = cycle.type == DemandType.fresh;
+    final itemCount = store.itemsForCycle(cycle).length;
 
     return Scaffold(
       appBar: AppBar(title: Text(cycle.title)),
@@ -69,7 +71,10 @@ class LinkDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       Wrap(spacing: 8, runSpacing: 8, children: [
-                        Pill(zoneLabel, color: AppColors.accent, icon: Icons.shield_moon_rounded),
+                        Pill('${cycle.type.label} · ${cycle.days} days', color: fresh ? AppColors.success : AppColors.accent, icon: fresh ? Icons.eco_rounded : Icons.grain_rounded),
+                        Pill(cycle.month.label, color: AppColors.cBakery, icon: Icons.calendar_month_rounded),
+                        Pill(zoneLabel, color: AppColors.brand, icon: Icons.shield_moon_rounded),
+                        Pill('$itemCount items', color: AppColors.cVeg, icon: Icons.playlist_add_check_rounded),
                         Pill('${orders.length} orders', color: AppColors.cDairy, icon: Icons.receipt_long_rounded),
                         Pill('${fmtNum(units)} units', color: AppColors.brand, icon: Icons.inventory_2_rounded),
                       ]),
@@ -102,6 +107,11 @@ class LinkDetailScreen extends StatelessWidget {
                             onPressed: () => _notify(context, store, cycle),
                             icon: const Icon(Icons.campaign_rounded, size: 18),
                             label: const Text('Notify customers'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => _editItems(context, store, cycle),
+                            icon: const Icon(Icons.playlist_add_check_rounded, size: 18),
+                            label: const Text('Edit items'),
                           ),
                           if (open)
                             OutlinedButton.icon(
@@ -145,6 +155,30 @@ class LinkDetailScreen extends StatelessWidget {
     );
   }
 
+  /// Edit which varieties are on this demand after it's opened — same "only
+  /// ticked items reach the customer" rule as when raising it.
+  Future<void> _editItems(BuildContext context, AppStore store, OrderCycle cycle) async {
+    // Candidates = every article valid for this demand's ration type.
+    final candidates = store.items
+        .where((i) => itemAllowedIn(cycle.type, i.category, i.name))
+        .toList();
+    final selected = <String>{
+      ...(cycle.hasCuratedList ? cycle.itemIds : candidates.map((i) => i.id)),
+    };
+    final result = await showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _EditItemsSheet(cycle: cycle, candidates: candidates, initial: selected),
+    );
+    if (result != null) {
+      store.setCycleItems(cycle, result);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${result.length} items on ${cycle.title}')));
+      }
+    }
+  }
+
   Future<void> _notify(BuildContext context, AppStore store, OrderCycle cycle) async {
     final body = 'Place your ${cycle.title} ration order before the link closes.';
     final result = await showNotifyCustomersSheet(context, title: '${cycle.title} is open', body: body);
@@ -156,6 +190,113 @@ class LinkDetailScreen extends StatelessWidget {
         subject: 'Ration order — ${cycle.title}',
       );
     }
+  }
+}
+
+/// Tick/untick the varieties on a demand. Grouped by category, with a per-group
+/// select-all — the same picker used when raising the demand.
+class _EditItemsSheet extends StatefulWidget {
+  final OrderCycle cycle;
+  final List<Item> candidates;
+  final Set<String> initial;
+  const _EditItemsSheet({required this.cycle, required this.candidates, required this.initial});
+
+  @override
+  State<_EditItemsSheet> createState() => _EditItemsSheetState();
+}
+
+class _EditItemsSheetState extends State<_EditItemsSheet> {
+  late final Set<String> _selected = {...widget.initial};
+
+  Map<String, List<Item>> get _grouped {
+    final map = <String, List<Item>>{};
+    for (final cat in kCategories) {
+      final inCat = widget.candidates.where((i) => i.category == cat.name).toList();
+      if (inCat.isNotEmpty) map[cat.name] = inCat;
+    }
+    return map;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final grouped = _grouped;
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.8,
+      maxChildSize: 0.95,
+      builder: (context, controller) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(widget.cycle.type == DemandType.fresh ? Icons.eco_rounded : Icons.grain_rounded, color: AppColors.brand),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Items on ${widget.cycle.title}', style: t.titleLarge)),
+              Text('${_selected.length}', style: t.titleMedium?.copyWith(color: AppColors.brand, fontWeight: FontWeight.w800)),
+            ]),
+            const SizedBox(height: 4),
+            Text('Only ticked items appear to the customer.', style: t.bodySmall),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView(
+                controller: controller,
+                children: [
+                  for (final e in grouped.entries)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Icon(categoryOf(e.key).icon, size: 16, color: categoryOf(e.key).color),
+                            const SizedBox(width: 8),
+                            Text(e.key, style: t.titleSmall),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () => setState(() {
+                                final ids = e.value.map((i) => i.id);
+                                final allOn = e.value.every((i) => _selected.contains(i.id));
+                                allOn ? _selected.removeAll(ids) : _selected.addAll(ids);
+                              }),
+                              child: Text(e.value.every((i) => _selected.contains(i.id)) ? 'Clear' : 'All'),
+                            ),
+                          ]),
+                          Wrap(spacing: 8, runSpacing: 8, children: [
+                            for (final i in e.value)
+                              FilterChip(
+                                selected: _selected.contains(i.id),
+                                onSelected: (on) => setState(() => on ? _selected.add(i.id) : _selected.remove(i.id)),
+                                avatar: Text(i.emoji, style: const TextStyle(fontSize: 15)),
+                                label: Text(i.name),
+                                showCheckmark: false,
+                                selectedColor: AppColors.brandWash,
+                                shape: const StadiumBorder(),
+                              ),
+                          ]),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton(
+                  onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected),
+                  child: const Text('Save items'),
+                ),
+              ),
+            ]),
+          ],
+        ),
+      ),
+    );
   }
 }
 
