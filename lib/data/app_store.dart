@@ -163,6 +163,7 @@ class AppStore extends ChangeNotifier {
 
   Timer? _reloadDebounce;
   bool _reloading = false; // guard: prevents overlapping network calls
+  bool _reloadQueued = false; // run one more pass if events arrived mid-fetch
 
   /// Connect to Supabase: restore session, load real data + subscribe to live changes.
   ///
@@ -221,9 +222,12 @@ class AppStore extends ChangeNotifier {
   Future<void> reload() async {
     final sb = _sb;
     if (sb == null) return;
-    // If a reload is already in flight, skip — the in-flight one will call
-    // notifyListeners() when it finishes, so the UI won't miss anything.
-    if (_reloading) return;
+    // If a reload is already in flight, queue one follow-up so we don't miss
+    // a realtime event that arrived mid-fetch.
+    if (_reloading) {
+      _reloadQueued = true;
+      return;
+    }
     _reloading = true;
     try {
       final fetchedItems = await sb.fetchItems();
@@ -234,6 +238,18 @@ class AppStore extends ChangeNotifier {
       try {
         fetchedBroadcasts = await sb.fetchBroadcasts();
       } catch (_) {}
+
+      // Cheap fingerprint: skip notifyListeners() when nothing meaningful changed.
+      // This prevents a full UI rebuild when a debounced realtime event refetches
+      // the same data the initial reload already loaded.
+      final same = fetchedItems.length == items.length &&
+          fetchedOrders.length == orders.length &&
+          fetchedCycles.length == cycles.length &&
+          fetchedUsers.length == users.length &&
+          fetchedBroadcasts.length == customerBroadcasts.length &&
+          (fetchedItems.isEmpty || items.isEmpty || fetchedItems.first.id == items.first.id) &&
+          (fetchedOrders.isEmpty || orders.isEmpty || fetchedOrders.first.id == orders.first.id);
+
       // Always replace with real data — this clears any in-memory seed data
       // so the UI never shows demo items alongside real DB rows.
       // Keep in-memory orders the server didn't return (RLS gap, pending sync).
@@ -256,11 +272,16 @@ class AppStore extends ChangeNotifier {
       cycles
         ..clear()
         ..addAll(fetchedCycles);
-      notifyListeners();
+      // Only repaint the entire widget tree if data actually changed.
+      if (!same) notifyListeners();
     } catch (_) {
       // On any failure keep the existing data so the UI stays usable.
     } finally {
       _reloading = false;
+      if (_reloadQueued) {
+        _reloadQueued = false;
+        unawaited(reload());
+      }
     }
   }
 
