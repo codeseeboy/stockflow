@@ -42,7 +42,11 @@ class OrderForm extends StatefulWidget {
   final String name;
   final String phone;
   final String designation;
-  const OrderForm({super.key, required this.name, required this.phone, this.designation = ''});
+
+  /// Jumps to the Balance tab — used after a demand is placed, instead of
+  /// squeezing the whole balance into this page.
+  final VoidCallback? onOpenBalance;
+  const OrderForm({super.key, required this.name, required this.phone, this.designation = '', this.onOpenBalance});
 
   @override
   State<OrderForm> createState() => _OrderFormState();
@@ -188,7 +192,7 @@ class _OrderFormState extends State<OrderForm> {
 
     // Single window already used → full-screen "closed for you" state.
     if (windows.length == 1 && alreadyOrdered) {
-      return _AlreadyOrderedState(cycle: cycle, balances: _orderedBalances(onDemand));
+      return _AlreadyOrderedState(cycle: cycle, onOpenBalance: widget.onOpenBalance);
     }
 
     final matches = onDemand.where((i) {
@@ -449,47 +453,43 @@ class _EmptyDemandState extends StatelessWidget {
   }
 }
 
-/// Shown after a customer has placed their demand for the open cycle. Their
-/// balance stays visible — what's still due to them for the month.
+/// Shown after a customer has placed their demand for the open cycle. Kept
+/// clean — the full balance breakdown lives on the Balance tab, one tap away.
 class _AlreadyOrderedState extends StatelessWidget {
   final OrderCycle cycle;
-  final List<CategoryBalance> balances;
-  const _AlreadyOrderedState({required this.cycle, required this.balances});
+  final VoidCallback? onOpenBalance;
+  const _AlreadyOrderedState({required this.cycle, this.onOpenBalance});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: Column(children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(color: AppColors.successWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
-              child: const Icon(Icons.verified_rounded, size: 38, color: AppColors.success),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(color: AppColors.successWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
+            child: const Icon(Icons.verified_rounded, size: 38, color: AppColors.success),
+          ),
+          const SizedBox(height: 18),
+          Text('Demand placed', style: t.titleLarge, textAlign: TextAlign.center),
+          const SizedBox(height: 6),
+          Text(
+            '${cycle.title} is done for you. It reopens with the next demand.',
+            textAlign: TextAlign.center,
+            style: t.bodyMedium,
+          ),
+          if (onOpenBalance != null) ...[
+            const SizedBox(height: 22),
+            FilledButton.icon(
+              onPressed: onOpenBalance,
+              icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+              label: Text('View my ${cycle.month.shortLabel} balance'),
             ),
-            const SizedBox(height: 18),
-            Text('Demand placed for ${cycle.title}', style: t.titleLarge, textAlign: TextAlign.center),
-            const SizedBox(height: 6),
-            Text(
-              'Your remaining balance for ${cycle.month.label} is below.',
-              textAlign: TextAlign.center,
-              style: t.bodyMedium,
-            ),
-            const SizedBox(height: 20),
-            BalanceSummaryCard(
-              month: cycle.month,
-              balances: balances,
-              picked: const {},
-              zoneLabel: cycle.isPublic ? '' : cycle.designation,
-            ),
-            const SizedBox(height: 20),
-          ]),
-        ),
+          ],
+        ]),
       ),
     );
   }

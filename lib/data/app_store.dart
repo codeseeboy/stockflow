@@ -161,14 +161,23 @@ class AppStore extends ChangeNotifier {
     if (items.isEmpty) _seed();
   }
 
+  Timer? _reloadDebounce;
+
   /// Connect to Supabase: restore session, load real data + subscribe to live changes.
+  ///
+  /// Realtime events are debounced: a bulk import fires one event per changed
+  /// row, and refetching everything for each of them made the UI "reload again
+  /// and again". One trailing reload covers the whole burst.
   Future<void> connectSupabase(SupabaseService sb) async {
     _sb = sb;
     await sb.restoreSession();
     _bootstrapped = true;
     notifyListeners();
     await reload();
-    sb.subscribe(() => reload());
+    sb.subscribe(() {
+      _reloadDebounce?.cancel();
+      _reloadDebounce = Timer(const Duration(milliseconds: 700), () => reload());
+    });
   }
 
   /// True when running on Supabase (live) — admin/staff must sign in to write.
@@ -806,6 +815,7 @@ class AppStore extends ChangeNotifier {
   ImportSummary importStock(List<ImportRow> rows, {required bool addToExisting}) {
     var added = 0;
     var updated = 0;
+    final newRows = <Map<String, dynamic>>[];
     for (final r in rows) {
       final match = items.where((i) => i.name.toLowerCase() == r.name.toLowerCase());
       if (match.isNotEmpty) {
@@ -839,11 +849,23 @@ class AppStore extends ChangeNotifier {
           reorderLevel: r.reorder,
         ));
         added++;
-        _fire(_sb?.insertItem(name: r.name, emoji: emoji, category: category, unit: unit, qty: r.qty, reorder: r.reorder));
+        newRows.add({
+          'name': r.name,
+          'emoji': emoji,
+          'category': category,
+          'unit': unit,
+          'opening_qty': r.qty,
+          'current_qty': r.qty,
+          'reorder_level': r.reorder,
+        });
       }
     }
     notifyListeners();
-    if (_sb != null) _fire(reload());
+    final sb = _sb;
+    if (sb != null) {
+      // One bulk insert + one reload for the whole sheet.
+      _fire(sb.insertItems(newRows).then((_) => reload()));
+    }
     return ImportSummary(added: added, updated: updated);
   }
 

@@ -2,6 +2,7 @@ import 'package:supabase/supabase.dart';
 
 import '../config/supabase_config.dart';
 import '../models/models.dart';
+import '../utils/item_icon_brain.dart';
 import '../utils/session_store.dart';
 
 /// Thin wrapper over the Supabase client. Maps DB rows <-> app models and
@@ -219,6 +220,13 @@ class SupabaseService {
         'reorder_level': reorder,
       });
 
+  /// Bulk insert for imports — one network call and one realtime event for the
+  /// whole sheet, instead of one per row (which made the UI reload repeatedly).
+  Future<void> insertItems(List<Map<String, dynamic>> rows) async {
+    if (rows.isEmpty) return;
+    await client.from('items').insert(rows);
+  }
+
   Future<void> insertUser({
     required String name,
     required UserRole role,
@@ -301,16 +309,25 @@ class SupabaseService {
 
   // ---- Mappers -----------------------------------------------------------
 
-  Item _item(Map<String, dynamic> r) => Item(
-        id: r['id'].toString(),
-        name: r['name'] as String,
-        emoji: (r['emoji'] as String?) ?? '📦',
-        category: r['category'] as String,
-        unit: r['unit'] as String,
-        openingQty: _d(r['opening_qty']),
-        currentQty: _d(r['current_qty']),
-        reorderLevel: _d(r['reorder_level']),
-      );
+  Item _item(Map<String, dynamic> r) {
+    final name = (r['name'] as String?) ?? '';
+    var emoji = (r['emoji'] as String?) ?? '';
+    // Rows imported before the icon brain existed (or with a bad emoji column)
+    // arrive as 📦 boxes — resolve the right icon from the name at read time.
+    if (emoji.isEmpty || emoji == '📦') {
+      emoji = ItemIconBrain.suggest(name, const []).emoji;
+    }
+    return Item(
+      id: r['id'].toString(),
+      name: name,
+      emoji: emoji,
+      category: (r['category'] as String?) ?? 'Essentials',
+      unit: (r['unit'] as String?) ?? 'kg',
+      openingQty: _d(r['opening_qty']),
+      currentQty: _d(r['current_qty']),
+      reorderLevel: _d(r['reorder_level']),
+    );
+  }
 
   AppUser _user(Map<String, dynamic> r) => AppUser(
         id: r['id'].toString(),
