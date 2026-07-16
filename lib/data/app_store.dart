@@ -162,6 +162,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Timer? _reloadDebounce;
+  bool _reloading = false; // guard: prevents overlapping network calls
 
   /// Connect to Supabase: restore session, load real data + subscribe to live changes.
   ///
@@ -172,7 +173,8 @@ class AppStore extends ChangeNotifier {
     _sb = sb;
     await sb.restoreSession();
     _bootstrapped = true;
-    notifyListeners();
+    // reload() will call notifyListeners() once everything is fetched —
+    // no need for an extra notifyListeners() here that would cause a blank flash.
     await reload();
     sb.subscribe(() {
       _reloadDebounce?.cancel();
@@ -193,8 +195,7 @@ class AppStore extends ChangeNotifier {
     await sb.signIn(email, password);
     final role = await currentRole() ?? UserRole.admin;
     SavedAdminSession(email: email, role: role).save();
-    await reload();
-    notifyListeners();
+    await reload(); // reload() calls notifyListeners() — no extra call needed
   }
 
   /// Role of the signed-in user, from their profile.
@@ -213,14 +214,17 @@ class AppStore extends ChangeNotifier {
   Future<void> signOut() async {
     await _sb?.signOut();
     SavedAdminSession.clear();
-    await reload();
-    notifyListeners();
+    await reload(); // reload() calls notifyListeners() — no extra call needed
   }
 
   /// Pull the latest data from Supabase into the local cache.
   Future<void> reload() async {
     final sb = _sb;
     if (sb == null) return;
+    // If a reload is already in flight, skip — the in-flight one will call
+    // notifyListeners() when it finishes, so the UI won't miss anything.
+    if (_reloading) return;
+    _reloading = true;
     try {
       final fetchedItems = await sb.fetchItems();
       final fetchedUsers = await sb.fetchUsers();
@@ -255,6 +259,8 @@ class AppStore extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       // On any failure keep the existing data so the UI stays usable.
+    } finally {
+      _reloading = false;
     }
   }
 

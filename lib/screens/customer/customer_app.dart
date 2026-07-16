@@ -244,7 +244,9 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         selectedIndex: _index,
         onDestinationSelected: (i) {
           setState(() => _index = i);
-          context.read<AppStore>().reload();
+          // Data is kept fresh by the 15-second polling timer and Supabase
+          // realtime — no need to fire a full reload on every tab tap, which
+          // was causing a visible flash each time the user switched tabs.
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
