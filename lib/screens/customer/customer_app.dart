@@ -125,9 +125,54 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
     }
   }
 
+  /// Rule-based nudges — the app knows the ration cycle, so it speaks up at
+  /// the two moments that matter, without the admin doing anything:
+  ///  * a demand for this customer's zone just opened;
+  ///  * a demand closes within 24 h and they haven't placed theirs yet.
+  /// Each fires once per demand (remembered on-device).
+  void _smartNudges(AppStore store) {
+    const seenKey = 'nudge_seen_open';
+    const closeKey = 'nudge_closing';
+    final seenOpen = (AppPrefs.getString(seenKey) ?? '').split(',').toSet();
+    final nudgedClose = (AppPrefs.getString(closeKey) ?? '').split(',').toSet();
+    final myOrders = customerOrdersFor(store, widget.name, widget.phone).map((o) => o.cycleId).toSet();
+    var changed = false;
+
+    for (final c in store.openCyclesFor(widget.designation)) {
+      final closesAt = DateTime(c.weekEnd.year, c.weekEnd.month, c.weekEnd.day, 23, 59);
+      final left = closesAt.difference(DateTime.now());
+
+      if (!seenOpen.contains(c.id)) {
+        seenOpen.add(c.id);
+        changed = true;
+        // Don't re-announce demands that were already open on first launch.
+        if (DateTime.now().difference(_sessionStart).inSeconds > 20) {
+          NotificationService.show(
+            '${c.type.label} demand is open',
+            'Place your demand before ${DateFormat('d MMM').format(c.weekEnd)}.',
+          );
+        }
+      }
+
+      if (!left.isNegative && left.inHours < 24 && !myOrders.contains(c.id) && !nudgedClose.contains(c.id)) {
+        nudgedClose.add(c.id);
+        changed = true;
+        NotificationService.show(
+          'Closing soon — ${c.title}',
+          'You haven\'t placed your demand yet. It closes in ${left.inHours}h ${left.inMinutes % 60}m.',
+        );
+      }
+    }
+    if (changed) {
+      AppPrefs.setString(seenKey, seenOpen.where((s) => s.isNotEmpty).join(','));
+      AppPrefs.setString(closeKey, nudgedClose.where((s) => s.isNotEmpty).join(','));
+    }
+  }
+
   void _onStoreUpdate() {
     if (!mounted) return;
     final store = context.read<AppStore>();
+    _smartNudges(store);
     if (store.customerBroadcasts.length <= _seenBroadcasts) {
       _seenBroadcasts = store.customerBroadcasts.length;
       return;
@@ -174,7 +219,12 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         onOrderNow: () => setState(() => _index = 1),
         onOpenBalance: () => setState(() => _index = 2),
       ),
-      OrderForm(name: widget.name, phone: widget.phone, designation: widget.designation),
+      OrderForm(
+        name: widget.name,
+        phone: widget.phone,
+        designation: widget.designation,
+        onOpenBalance: () => setState(() => _index = 2),
+      ),
       BalanceScreen(name: widget.name, phone: widget.phone, designation: widget.designation),
       _MyOrdersTab(name: widget.name, phone: widget.phone, onOrderNow: () => setState(() => _index = 1)),
       _ProfileTab(name: widget.name, phone: widget.phone, email: widget.email, address: widget.address),
@@ -194,7 +244,9 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         selectedIndex: _index,
         onDestinationSelected: (i) {
           setState(() => _index = i);
-          context.read<AppStore>().reload();
+          // Data is kept fresh by the 15-second polling timer and Supabase
+          // realtime — no need to fire a full reload on every tab tap, which
+          // was causing a visible flash each time the user switched tabs.
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
@@ -440,7 +492,7 @@ class _HomeTab extends StatelessWidget {
     final lastOrder = myOrders.isNotEmpty ? myOrders.first : null;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
@@ -448,17 +500,47 @@ class _HomeTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _HomeGreeting(name: displayName),
-              const SizedBox(height: 16),
+              const SizedBox(height: 22),
+              const _SectionLabel('CURRENT DEMAND'),
+              const SizedBox(height: 8),
               _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
-              const SizedBox(height: 12),
+              const SizedBox(height: 22),
+              const _SectionLabel('YOUR BALANCE'),
+              const SizedBox(height: 8),
               _BalanceSnapshot(store: store, name: name, phone: phone, designation: designation, onOpen: onOpenBalance),
               if (lastOrder != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 22),
+                const _SectionLabel('RECENT'),
+                const SizedBox(height: 8),
                 _LastOrderStrip(order: lastOrder),
               ],
               const BrandFooter(),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small uppercase section label — gives the page scannable structure
+/// without adding sentences.
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(left: 2),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.1,
+          color: scheme.onSurfaceVariant,
         ),
       ),
     );

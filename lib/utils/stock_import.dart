@@ -36,6 +36,12 @@ class ImportSummary {
   const ImportSummary({required this.added, required this.updated});
 }
 
+/// Parse a raw 2-D string table (list of rows, each a list of cell strings)
+/// into stock rows.  Exposed for unit tests so tests don't need a real .xlsx
+/// binary.
+// ignore: unused_element
+ImportResult parseStockRows(List<List<String>> table) => _parseTable(table);
+
 /// Parse an uploaded .xlsx / .csv into stock rows.
 ImportResult parseStockFile(String filename, Uint8List bytes) {
   final lower = filename.toLowerCase();
@@ -75,6 +81,28 @@ List<List<String>> _csvToTable(String text) {
   ];
 }
 
+bool _isNumeric(String s) => s.isNotEmpty && double.tryParse(s.replaceAll(RegExp(r'[,\s]'), '')) != null;
+
+/// True when a column looks like a serial/№ column: header says so, or the
+/// data is just the row count in order (1, 2, 3, …).
+bool _looksLikeSerial(List<List<String>> table, int headerIndex, int col, List<String> headers) {
+  final h = headers[col];
+  if (h == 'ser' || h == 'sno' || h == 's.no' || h == 'sl' || h.contains('ser no') || h.contains('sr no') || h.contains('serial') || h == '#' || h == 'no' || h == 'no.') {
+    return true;
+  }
+  var expected = 1;
+  var matches = 0;
+  var seen = 0;
+  for (var i = headerIndex + 1; i < table.length && seen < 12; i++) {
+    final v = col < table[i].length ? table[i][col].trim() : '';
+    if (v.isEmpty) continue;
+    seen++;
+    if (int.tryParse(v) == expected) matches++;
+    expected++;
+  }
+  return seen >= 3 && matches >= seen - 1;
+}
+
 ImportResult _parseTable(List<List<String>> table) {
   final warnings = <String>[];
   // Find the first non-empty row as the header.
@@ -83,9 +111,10 @@ ImportResult _parseTable(List<List<String>> table) {
     return const ImportResult([], ['The file looks empty.']);
   }
   final headers = table[headerIndex].map((h) => h.toLowerCase().trim()).toList();
+  final colCount = headers.length;
 
   int? col(List<String> keys) {
-    for (var i = 0; i < headers.length; i++) {
+    for (var i = 0; i < colCount; i++) {
       for (final k in keys) {
         if (headers[i] == k || headers[i].contains(k)) return i;
       }
@@ -93,30 +122,83 @@ ImportResult _parseTable(List<List<String>> table) {
     return null;
   }
 
+  // Column profile over the data rows: how texty / numeric each column is.
+  // Used to find the name and quantity columns when headers don't say.
+  final textScore = List<int>.filled(colCount, 0);
+  final numScore = List<int>.filled(colCount, 0);
+  for (var i = headerIndex + 1; i < table.length; i++) {
+    for (var c = 0; c < colCount && c < table[i].length; c++) {
+      final v = table[i][c].trim();
+      if (v.isEmpty) continue;
+      if (_isNumeric(v)) {
+        numScore[c]++;
+      } else {
+        textScore[c]++;
+      }
+    }
+  }
+
+  var nameCol = col(['name', 'item', 'product', 'article', 'description', 'particular', 'commodity', 'nomenclature']);
+  // Header didn't say → the most text-heavy column that isn't a serial column.
+  if (nameCol == null || _looksLikeSerial(table, headerIndex, nameCol, headers)) {
+    var best = -1;
+    var bestScore = 0;
+    for (var c = 0; c < colCount; c++) {
+      if (_looksLikeSerial(table, headerIndex, c, headers)) continue;
+      if (textScore[c] > bestScore) {
+        best = c;
+        bestScore = textScore[c];
+      }
+    }
+    if (best >= 0) {
+      nameCol = best;
+      warnings.add('Item names read from the "${headers[best]}" column.');
+    }
+  }
+
+  var qtyCol = col(['quantity', 'qty', 'opening', 'stock', 'balance', 'held', 'in hand']);
+  // Header didn't say → the most numeric column that isn't serial or the name.
+  if (qtyCol == null) {
+    var best = -1;
+    var bestScore = 0;
+    for (var c = 0; c < colCount; c++) {
+      if (c == nameCol || _looksLikeSerial(table, headerIndex, c, headers)) continue;
+      if (numScore[c] > bestScore) {
+        best = c;
+        bestScore = numScore[c];
+      }
+    }
+    if (best >= 0) {
+      qtyCol = best;
+      warnings.add('Quantities read from the "${headers[best]}" column.');
+    } else {
+      warnings.add('No quantity column found. Quantities default to 0 — check flagged rows before applying.');
+    }
+  }
+
   final ci = {
-    'name': col(['name', 'item', 'product']),
-    'category': col(['category', 'cat', 'type']),
-    'unit': col(['unit', 'uom']),
-    'qty': col(['quantity', 'qty', 'opening', 'stock']),
+    'name': nameCol,
+    'category': col(['category', 'cat', 'type', 'group']),
+    'unit': col(['unit', 'uom', 'a/u']),
+    'qty': qtyCol,
     'reorder': col(['reorder', 'min', 'threshold']),
     'emoji': col(['emoji', 'icon']),
   };
-
-  if (ci['name'] == null) {
-    warnings.add('No "name" column found. The first column will be used as the item name.');
-  }
-  if (ci['qty'] == null) {
-    warnings.add('No "quantity" column found. Quantities default to 0.');
-  }
 
   String at(List<String> row, int? idx) =>
       (idx != null && idx >= 0 && idx < row.length) ? row[idx].trim() : '';
 
   final rows = <ImportRow>[];
+  var skippedNumericNames = 0;
   for (var i = headerIndex + 1; i < table.length; i++) {
     final row = table[i];
     final name = ci['name'] != null ? at(row, ci['name']) : (row.isNotEmpty ? row.first.trim() : '');
     if (name.isEmpty) continue;
+    // A bare number is never an item name — that's a serial or a stray total.
+    if (_isNumeric(name)) {
+      skippedNumericNames++;
+      continue;
+    }
     rows.add(ImportRow(
       name: name,
       emoji: at(row, ci['emoji']).isEmpty ? '📦' : at(row, ci['emoji']),
@@ -127,6 +209,9 @@ ImportResult _parseTable(List<List<String>> table) {
     ));
   }
 
+  if (skippedNumericNames > 0) {
+    warnings.add('$skippedNumericNames row(s) had a number where the name should be — skipped. Check the sheet if that looks wrong.');
+  }
   if (rows.isEmpty) warnings.add('No data rows found below the header.');
   return ImportResult(rows, warnings);
 }

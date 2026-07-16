@@ -161,14 +161,26 @@ class AppStore extends ChangeNotifier {
     if (items.isEmpty) _seed();
   }
 
+  Timer? _reloadDebounce;
+  bool _reloading = false; // guard: prevents overlapping network calls
+  bool _reloadQueued = false; // run one more pass if events arrived mid-fetch
+
   /// Connect to Supabase: restore session, load real data + subscribe to live changes.
+  ///
+  /// Realtime events are debounced: a bulk import fires one event per changed
+  /// row, and refetching everything for each of them made the UI "reload again
+  /// and again". One trailing reload covers the whole burst.
   Future<void> connectSupabase(SupabaseService sb) async {
     _sb = sb;
     await sb.restoreSession();
     _bootstrapped = true;
-    notifyListeners();
+    // reload() will call notifyListeners() once everything is fetched —
+    // no need for an extra notifyListeners() here that would cause a blank flash.
     await reload();
-    sb.subscribe(() => reload());
+    sb.subscribe(() {
+      _reloadDebounce?.cancel();
+      _reloadDebounce = Timer(const Duration(milliseconds: 700), () => reload());
+    });
   }
 
   /// True when running on Supabase (live) — admin/staff must sign in to write.
@@ -184,8 +196,7 @@ class AppStore extends ChangeNotifier {
     await sb.signIn(email, password);
     final role = await currentRole() ?? UserRole.admin;
     SavedAdminSession(email: email, role: role).save();
-    await reload();
-    notifyListeners();
+    await reload(); // reload() calls notifyListeners() — no extra call needed
   }
 
   /// Role of the signed-in user, from their profile.
@@ -204,14 +215,20 @@ class AppStore extends ChangeNotifier {
   Future<void> signOut() async {
     await _sb?.signOut();
     SavedAdminSession.clear();
-    await reload();
-    notifyListeners();
+    await reload(); // reload() calls notifyListeners() — no extra call needed
   }
 
   /// Pull the latest data from Supabase into the local cache.
   Future<void> reload() async {
     final sb = _sb;
     if (sb == null) return;
+    // If a reload is already in flight, queue one follow-up so we don't miss
+    // a realtime event that arrived mid-fetch.
+    if (_reloading) {
+      _reloadQueued = true;
+      return;
+    }
+    _reloading = true;
     try {
       final fetchedItems = await sb.fetchItems();
       final fetchedUsers = await sb.fetchUsers();
@@ -221,6 +238,18 @@ class AppStore extends ChangeNotifier {
       try {
         fetchedBroadcasts = await sb.fetchBroadcasts();
       } catch (_) {}
+
+      // Cheap fingerprint: skip notifyListeners() when nothing meaningful changed.
+      // This prevents a full UI rebuild when a debounced realtime event refetches
+      // the same data the initial reload already loaded.
+      final same = fetchedItems.length == items.length &&
+          fetchedOrders.length == orders.length &&
+          fetchedCycles.length == cycles.length &&
+          fetchedUsers.length == users.length &&
+          fetchedBroadcasts.length == customerBroadcasts.length &&
+          (fetchedItems.isEmpty || items.isEmpty || fetchedItems.first.id == items.first.id) &&
+          (fetchedOrders.isEmpty || orders.isEmpty || fetchedOrders.first.id == orders.first.id);
+
       // Always replace with real data — this clears any in-memory seed data
       // so the UI never shows demo items alongside real DB rows.
       // Keep in-memory orders the server didn't return (RLS gap, pending sync).
@@ -243,9 +272,16 @@ class AppStore extends ChangeNotifier {
       cycles
         ..clear()
         ..addAll(fetchedCycles);
-      notifyListeners();
+      // Only repaint the entire widget tree if data actually changed.
+      if (!same) notifyListeners();
     } catch (_) {
       // On any failure keep the existing data so the UI stays usable.
+    } finally {
+      _reloading = false;
+      if (_reloadQueued) {
+        _reloadQueued = false;
+        unawaited(reload());
+      }
     }
   }
 
@@ -806,6 +842,7 @@ class AppStore extends ChangeNotifier {
   ImportSummary importStock(List<ImportRow> rows, {required bool addToExisting}) {
     var added = 0;
     var updated = 0;
+    final newRows = <Map<String, dynamic>>[];
     for (final r in rows) {
       final match = items.where((i) => i.name.toLowerCase() == r.name.toLowerCase());
       if (match.isNotEmpty) {
@@ -839,11 +876,23 @@ class AppStore extends ChangeNotifier {
           reorderLevel: r.reorder,
         ));
         added++;
-        _fire(_sb?.insertItem(name: r.name, emoji: emoji, category: category, unit: unit, qty: r.qty, reorder: r.reorder));
+        newRows.add({
+          'name': r.name,
+          'emoji': emoji,
+          'category': category,
+          'unit': unit,
+          'opening_qty': r.qty,
+          'current_qty': r.qty,
+          'reorder_level': r.reorder,
+        });
       }
     }
     notifyListeners();
-    if (_sb != null) _fire(reload());
+    final sb = _sb;
+    if (sb != null) {
+      // One bulk insert + one reload for the whole sheet.
+      _fire(sb.insertItems(newRows).then((_) => reload()));
+    }
     return ImportSummary(added: added, updated: updated);
   }
 
