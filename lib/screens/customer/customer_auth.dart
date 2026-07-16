@@ -74,7 +74,6 @@ void enterCustomerApp(
     Navigator.of(context).pushAndRemoveUntil(route, (r) => false);
   }
 }
-
 String _friendly(Object e) {
   final s = e.toString().toLowerCase();
   if (s.contains('at least') || s.contains('6 char') || s.contains('weak') || (s.contains('password') && s.contains('short'))) {
@@ -522,7 +521,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
       final profileName = p?.name.trim() ?? '';
       final name = profileName.isNotEmpty && !profileName.contains('@') ? profileName : 'Unit';
       if (!mounted) return;
-      enterCustomerApp(context, name: name, phone: p?.phone ?? '', email: email);
+      enterCustomerApp(context, name: name, phone: p?.phone ?? '', email: email, designation: p?.zone ?? '');
     } catch (e) {
       setState(() => _error = _friendly(e));
     } finally {

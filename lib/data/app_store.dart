@@ -651,6 +651,9 @@ class AppStore extends ChangeNotifier {
         } else if (!orders.any((o) => o.id == sid)) {
           orders.insert(0, synced);
         }
+        // Retire the local copy from the on-device cache — its synced twin
+        // replaces it, otherwise the pair shows up as two orders.
+        SavedCustomerOrders.remove(customerName, customerPhone, localId);
         SavedCustomerOrders.upsert(customerName, customerPhone, synced);
         notifyListeners();
         await reload();
@@ -820,7 +823,9 @@ class AppStore extends ChangeNotifier {
         if (r.reorder > 0) _fire(_sb?.updateReorder(it.id, it.reorderLevel));
       } else {
         final smart = ItemIconBrain.suggest(r.name, items);
-        final emoji = r.emoji == '📦' || r.emoji.isEmpty ? smart.emoji : r.emoji;
+        // The name→icon brain wins when it's confident: a misaligned emoji
+        // column in the sheet must never leave Sugar wearing a peas icon.
+        final emoji = (smart.confidence >= 0.6 || r.emoji == '📦' || r.emoji.isEmpty) ? smart.emoji : r.emoji;
         final category = r.category.isEmpty || r.category == 'Essentials' && smart.confidence > 0.5 ? smart.category : r.category;
         final unit = r.unit.isEmpty ? smart.unit : r.unit;
         items.add(Item(
@@ -911,6 +916,7 @@ class AppStore extends ChangeNotifier {
     int? days,
     RationMonth? month,
     Set<String>? itemIds,
+    DateTime? start,
   }) {
     final previouslyOpen = <String>[];
     if (closeOthers) {
@@ -925,13 +931,12 @@ class AppStore extends ChangeNotifier {
     final span = days ?? type.defaultDays;
     final label = designation.trim();
 
-    // Fresh demands run in ~10-day slices through the month; the dry demand
-    // covers the whole month.
+    // Fresh demands run in ~10-day slices through the month (or from the
+    // week the admin picked); the dry demand covers the whole month.
     final index = demandCountIn(m, label, type);
-    final start = type == DemandType.dry
-        ? m.firstDay
-        : m.firstDay.add(Duration(days: index * span));
-    var end = start.add(Duration(days: span - 1));
+    final begin = start ??
+        (type == DemandType.dry ? m.firstDay : m.firstDay.add(Duration(days: index * span)));
+    var end = begin.add(Duration(days: span - 1));
     if (end.isAfter(m.lastDay)) end = m.lastDay;
 
     final ordinal = _ordinal(index + 1);
@@ -940,7 +945,7 @@ class AppStore extends ChangeNotifier {
     final cycle = OrderCycle(
       id: 'CY-${m.key}-${type.name}-${index + 1}$slug',
       title: label.isEmpty ? name : '$name · $label',
-      weekStart: start,
+      weekStart: begin,
       weekEnd: end,
       status: CycleStatus.open,
       shareToken: _token(),

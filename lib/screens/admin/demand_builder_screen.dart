@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/app_store.dart';
@@ -24,6 +25,7 @@ class _DemandBuilderScreenState extends State<DemandBuilderScreen> {
   late String _zone;
   late RationMonth _month;
   late int _days;
+  int _week = 1; // week of the month (1..5) a fresh demand starts in
   final Set<String> _selected = {};
   bool _seeded = false;
 
@@ -34,6 +36,14 @@ class _DemandBuilderScreenState extends State<DemandBuilderScreen> {
     _month = RationMonth.of(DateTime.now());
     _days = _type.defaultDays;
   }
+
+  int get _weeksInMonth => ((_month.days + 6) ~/ 7);
+
+  /// The date this demand starts: Week N of the chosen month for fresh,
+  /// always the 1st for dry.
+  DateTime get _startDate => _type == DemandType.dry
+      ? _month.firstDay
+      : _month.firstDay.add(Duration(days: (_week - 1) * 7));
 
   /// Items valid for the current ration type, grouped by category.
   Map<String, List<Item>> _grouped(AppStore store) {
@@ -138,6 +148,28 @@ class _DemandBuilderScreenState extends State<DemandBuilderScreen> {
                           onChanged: (v) => setState(() => _month = RationMonth.tryParse(v ?? '') ?? _month),
                         ),
                       ),
+                      if (_type == DemandType.fresh) ...[
+                        const Divider(height: 18),
+                        _fieldRow(
+                          icon: Icons.date_range_outlined,
+                          label: 'Starts in week',
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              for (var w = 1; w <= _weeksInMonth; w++)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 6),
+                                  child: ChoiceChip(
+                                    label: Text('W$w'),
+                                    selected: _week == w,
+                                    onSelected: (_) => setState(() => _week = w),
+                                    shape: const StadiumBorder(),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const Divider(height: 18),
                       _fieldRow(
                         icon: Icons.event_repeat_outlined,
@@ -156,6 +188,15 @@ class _DemandBuilderScreenState extends State<DemandBuilderScreen> {
                                 ),
                               ),
                           ],
+                        ),
+                      ),
+                      const Divider(height: 18),
+                      _fieldRow(
+                        icon: Icons.today_outlined,
+                        label: 'Runs',
+                        child: Text(
+                          '${DateFormat('d MMM').format(_startDate)} – ${DateFormat('d MMM').format(_startDate.add(Duration(days: _days - 1)))}',
+                          style: Theme.of(context).textTheme.titleSmall,
                         ),
                       ),
                     ],
@@ -233,6 +274,7 @@ class _DemandBuilderScreenState extends State<DemandBuilderScreen> {
       days: _days,
       month: _month,
       itemIds: Set<String>.of(_selected),
+      start: _startDate,
     );
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${cycle.title} opened')));
     Navigator.of(context).pushReplacement(

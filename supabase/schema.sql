@@ -83,8 +83,12 @@ create table if not exists orders (
   customer_name   text not null,
   customer_phone  text,
   status          order_status not null default 'pending',
+  order_no        bigserial,                      -- short display code: SF-<order_no>
   created_at      timestamptz not null default now()
 );
+
+-- Short order numbers for databases created before the column existed.
+alter table orders add column if not exists order_no bigserial;
 
 create table if not exists order_items (
   id            uuid primary key default gen_random_uuid(),
@@ -307,36 +311,5 @@ do $$ begin
   alter publication supabase_realtime add table customer_broadcasts;
 exception when duplicate_object then null; end $$;
 
--- ============================================================
--- Seed: sample stock + one open week. Only runs if empty, so it
--- is safe to re-run the whole file.
--- ============================================================
-insert into items (name, emoji, category, unit, opening_qty, current_qty, reorder_level)
-select * from (values
-  ('Basmati Rice','🍚','Grains','kg',1200,920,300),
-  ('Wheat Flour (Atta)','🌾','Grains','kg',800,540,200),
-  ('Toor Dal','🫘','Pulses','kg',400,150,160),
-  ('Chana Dal','🟡','Pulses','kg',300,210,100),
-  ('Potato','🥔','Vegetables','kg',600,430,150),
-  ('Onion','🧅','Vegetables','kg',500,205,150),
-  ('Tomato','🍅','Vegetables','kg',300,70,90),
-  ('Green Chilli','🌶️','Vegetables','kg',60,11,16),
-  ('Carrot','🥕','Vegetables','kg',180,96,50),
-  ('Banana','🍌','Fruits','dozen',200,42,55),
-  ('Apple','🍎','Fruits','kg',250,175,60),
-  ('Orange','🍊','Fruits','kg',200,130,50),
-  ('Milk','🥛','Dairy','litre',400,250,110),
-  ('Eggs','🥚','Dairy','dozen',350,120,100),
-  ('Paneer','🧀','Dairy','kg',120,64,45),
-  ('Bread','🍞','Bakery','packet',300,0,60),
-  ('Butter','🧈','Dairy','kg',90,58,30),
-  ('Cooking Oil','🛢️','Essentials','litre',300,235,80),
-  ('Sugar','🍬','Essentials','kg',250,188,70),
-  ('Tea','🍵','Essentials','kg',80,22,26),
-  ('Salt','🧂','Essentials','kg',150,118,40)
-) as v(name,emoji,category,unit,opening_qty,current_qty,reorder_level)
-where not exists (select 1 from items);
-
-insert into order_cycles (title, week_start, week_end, status)
-select 'Week 23','2026-06-02','2026-06-08','open'::cycle_status
-where not exists (select 1 from order_cycles);
+-- NOTE: no seed data. The catalogue comes only from what the admin uploads —
+-- placeholder rows here previously showed up as "fake stock" in the console.

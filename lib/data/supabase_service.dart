@@ -380,6 +380,7 @@ class SupabaseService {
       lines: lines,
       status: OrderStatus.values.byName((r['status'] as String?) ?? 'pending'),
       createdAt: DateTime.tryParse(r['created_at']?.toString() ?? '') ?? DateTime.now(),
+      orderNo: (r['order_no'] as num?)?.toInt(),
     );
   }
 

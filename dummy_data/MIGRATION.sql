@@ -18,3 +18,7 @@ alter table order_cycles add column if not exists item_ids          jsonb not nu
 
 -- The customer's zone (designation) — decides their entitlement scale
 alter table profiles add column if not exists zone text not null default '';
+
+-- Short human-readable order numbers (shown as SF-101). bigserial backfills
+-- every existing row automatically.
+alter table orders add column if not exists order_no bigserial;

@@ -30,8 +30,26 @@ class CyclesScreen extends StatelessWidget {
     final store = context.watch<AppStore>();
     final t = Theme.of(context).textTheme;
     final all = store.cyclesByRecent;
-    final live = all.where((c) => c.status == CycleStatus.open).toList();
-    final past = all.where((c) => c.status != CycleStatus.open).toList();
+
+    // Organised by month, newest month first — live demands float to the top
+    // within their month.
+    final months = <RationMonth>[];
+    final byMonth = <RationMonth, List<OrderCycle>>{};
+    for (final c in all) {
+      byMonth.putIfAbsent(c.month, () {
+        months.add(c.month);
+        return [];
+      }).add(c);
+    }
+    months.sort((a, b) => b.compareTo(a));
+    for (final m in months) {
+      byMonth[m]!.sort((a, b) {
+        final liveA = a.status == CycleStatus.open ? 0 : 1;
+        final liveB = b.status == CycleStatus.open ? 0 : 1;
+        if (liveA != liveB) return liveA - liveB;
+        return b.weekStart.compareTo(a.weekStart);
+      });
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -43,7 +61,7 @@ class CyclesScreen extends StatelessWidget {
             children: [
               SectionHeader(
                 title: 'Demands',
-                subtitle: 'Every fresh & dry demand — tap one to manage it',
+                subtitle: 'Organised by month — tap one to manage it',
                 action: FilledButton.icon(
                   onPressed: () => _newDemand(context),
                   icon: const Icon(Icons.add_rounded, size: 18),
@@ -51,26 +69,23 @@ class CyclesScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
-              Row(children: [
-                const Icon(Icons.circle, size: 9, color: AppColors.success),
-                const SizedBox(width: 7),
-                Text('Live now', style: t.titleMedium),
-                const SizedBox(width: 8),
-                Pill('${live.length}', color: AppColors.success),
-              ]),
-              const SizedBox(height: 10),
-              if (live.isEmpty)
-                const EmptyState(icon: Icons.link_off_rounded, title: 'No live demands', subtitle: 'Raise a demand to start accepting orders.')
+              if (months.isEmpty)
+                const EmptyState(icon: Icons.link_off_rounded, title: 'No demands yet', subtitle: 'Raise a demand to start accepting orders.')
               else
-                ...live.map((c) => _LinkRow(store: store, cycle: c, range: _range(c))),
-              const SizedBox(height: 24),
-              Text('Past demands', style: t.titleMedium),
-              const SizedBox(height: 10),
-              if (past.isEmpty)
-                const EmptyState(icon: Icons.history_rounded, title: 'No past demands yet')
-              else
-                ...past.map((c) => _LinkRow(store: store, cycle: c, range: _range(c))),
-              const SizedBox(height: 24),
+                for (final m in months) ...[
+                  Row(children: [
+                    Icon(Icons.calendar_month_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Text(m.label, style: t.titleMedium),
+                    const SizedBox(width: 8),
+                    if (byMonth[m]!.any((c) => c.status == CycleStatus.open))
+                      const Pill('live', color: AppColors.success),
+                  ]),
+                  const SizedBox(height: 10),
+                  ...byMonth[m]!.map((c) => _LinkRow(store: store, cycle: c, range: _range(c))),
+                  const SizedBox(height: 18),
+                ],
+              const BrandFooter(),
             ],
           ),
         ),

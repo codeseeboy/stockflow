@@ -115,7 +115,11 @@ EntitlementImportResult _parse(List<List<String>> table) {
     if (raw.isEmpty) continue;
 
     final value = _num(at(row, perDayCol));
-    if (value <= 0) continue;
+    if (value <= 0) {
+      // Never drop a row silently — the admin must know what didn't import.
+      warnings.add('"$raw" has no usable entitlement value — check this row.');
+      continue;
+    }
 
     // If the sheet states the entitlement over a period, bring it back to a
     // per-day rate — everything downstream is perDay × days.

@@ -36,19 +36,19 @@ class AppColors {
   static const inkFaint = Color(0xFF95A29C);
   static const line = Color(0xFFE2E8E5);
 
-  // Dark neutrals
-  static const dBg = Color(0xFF0E1613);
-  static const dSurface = Color(0xFF16201C);
-  static const dSurfaceMuted = Color(0xFF1E2925);
-  static const dInk = Color(0xFFEAF0ED);
-  static const dInkSoft = Color(0xFF9DACA5);
-  static const dLine = Color(0xFF283330);
+  // Dark neutrals — a real dark navy, not inverted gray
+  static const dBg = Color(0xFF0A1220);
+  static const dSurface = Color(0xFF111B2E);
+  static const dSurfaceMuted = Color(0xFF1A2740);
+  static const dInk = Color(0xFFE7EDF6);
+  static const dInkSoft = Color(0xFF9BAAC2);
+  static const dLine = Color(0xFF25344E);
 
-  // Dark status washes (muted tints that read on dark surfaces)
-  static const dSuccessWash = Color(0xFF1A3328);
-  static const dWarningWash = Color(0xFF352B16);
-  static const dDangerWash = Color(0xFF381F20);
-  static const dBrandWash = Color(0xFF1A3D2E);
+  // Dark status washes (muted tints that read on navy surfaces)
+  static const dSuccessWash = Color(0xFF163526);
+  static const dWarningWash = Color(0xFF33290F);
+  static const dDangerWash = Color(0xFF391D22);
+  static const dBrandWash = Color(0xFF143B2C);
 
   // Category accents
   static const cGrains = Color(0xFFCB9A1C);

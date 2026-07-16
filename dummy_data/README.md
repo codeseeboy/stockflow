@@ -14,8 +14,10 @@ Supabase → **SQL Editor → New query**:
 
 1. **`WIPE_DATA.sql`** — deletes all old items, orders, demands and customer
    accounts so you start fresh. Admin/staff logins are kept. *(Cannot be undone.)*
-2. **`MIGRATION.sql`** — adds the new demand/zone columns. Without it, raising
-   a demand or assigning a zone won't save. Safe to run more than once.
+2. **`MIGRATION.sql`** — adds the new demand/zone columns **and the short
+   order-number column (SF-101 codes)**. Without it, raising a demand or
+   assigning a zone won't save. Safe to run more than once — if you ran an
+   older copy, run it again to pick up `order_no`.
 
 After the wipe the app starts empty — upload your stock Excel again from the
 admin console (Import master stock) to load the item catalogue.

@@ -379,7 +379,7 @@ class _OrderFormState extends State<OrderForm> {
       );
       setState(() => _picked.clear());
       Navigator.pop(context); // review sheet
-      showDialog(context: context, builder: (_) => _SuccessDialog(orderId: order.id, items: order.itemCount));
+      showDialog(context: context, builder: (_) => _SuccessDialog(orderId: order.displayId, items: order.itemCount));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString().replaceFirst('StateError: ', ''))),
@@ -609,7 +609,7 @@ class BalanceSummaryCard extends StatelessWidget {
     final inCart = picked.values.fold<double>(0, (s, v) => s + v);
     final remaining = balances.fold<double>(0, (s, b) => s + b.remaining) - inCart;
     final total = balances.fold<double>(0, (s, b) => s + b.total);
-    final ratio = total <= 0 ? 0.0 : (remaining / total).clamp(0.0, 1.0);
+    final used = total <= 0 ? 0.0 : ((total - remaining) / total).clamp(0.0, 1.0);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -635,31 +635,54 @@ class BalanceSummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: ratio),
-              duration: const Duration(milliseconds: 320),
-              curve: Curves.easeOut,
-              builder: (_, v, _) => LinearProgressIndicator(
-                value: v,
-                minHeight: 10,
-                color: AppColors.brand,
-                backgroundColor: scheme.surfaceContainerHighest,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            Pill('${fmtNum(remaining)} left', color: AppColors.brand, icon: Icons.savings_rounded),
-            if (carried > 0)
-              Pill('+${fmtNum(carried)} carried', color: AppColors.accent, icon: Icons.move_up_rounded),
-            if (inCart > 0) Pill('${fmtNum(inCart)} in cart', color: AppColors.cDairy, icon: Icons.shopping_basket_rounded),
+          UsageBar(used01: used, height: 10),
+          const SizedBox(height: 12),
+          Row(children: [
+            _figure(context, 'Allowed', fmtNum(total)),
+            _divider(context),
+            _figure(context, 'Used', fmtNum(total - remaining)),
+            _divider(context),
+            _figure(context, 'Left', fmtNum(remaining), emphasize: true),
           ]),
+          if (carried > 0 || inCart > 0) ...[
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              if (carried > 0)
+                Pill('+${fmtNum(carried)} carried', color: AppColors.accent, icon: Icons.move_up_rounded),
+              if (inCart > 0) Pill('${fmtNum(inCart)} in cart', color: AppColors.cDairy, icon: Icons.shopping_basket_rounded),
+            ]),
+          ],
         ],
       ),
     );
   }
+
+  static Widget _figure(BuildContext context, String label, String value, {bool emphasize = false}) {
+    final t = Theme.of(context).textTheme;
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: t.bodySmall),
+          const SizedBox(height: 1),
+          Text(
+            value,
+            style: t.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: emphasize ? AppColors.brandDark : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _divider(BuildContext context) => Container(
+        width: 1,
+        height: 30,
+        margin: const EdgeInsets.symmetric(horizontal: 12),
+        color: Theme.of(context).colorScheme.outline,
+      );
 }
 
 /// Per-category balance bar: how much of this category is still due to the
@@ -677,15 +700,13 @@ class CategoryBalanceBar extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
 
     final left = (balance.remaining - picked).clamp(0.0, double.infinity);
-    final ratio = (left / balance.total).clamp(0.0, 1.0);
+    final used01 = ((balance.total - left) / balance.total).clamp(0.0, 1.0);
     final empty = left <= 1e-9;
-    final color = empty ? AppColors.warning : category.color;
 
-    final detail = <String>[
-      '${fmtNum(balance.allowance)} this month',
-      if (balance.carriedIn > 0) '+${fmtNum(balance.carriedIn)} carried',
-      if (balance.consumed > 0) '−${fmtNum(balance.consumed)} taken',
-    ].join(' · ');
+    // Allowed → Used → Left, spelt out for every category (with the cart
+    // counted as used, so the bar moves while picking).
+    final detail =
+        'Allowed ${fmtNum(balance.total)} · Used ${fmtNum(balance.total - left)} · Left ${fmtNum(left)}';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -694,35 +715,22 @@ class CategoryBalanceBar extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                empty ? '${category.name} entitlement used up' : '${category.name} left with you',
+                empty ? '${category.name} — used up' : category.name,
                 style: t.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: empty ? AppColors.warning : scheme.onSurfaceVariant,
+                  color: empty ? AppColors.danger : scheme.onSurfaceVariant,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             Text(
-              '${fmtNum(left)} / ${fmtNum(balance.total)} ${balance.unit}',
-              style: t.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: color),
+              '${fmtNum(left)} ${balance.unit} left',
+              style: t.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: usageColor(used01)),
             ),
           ],
         ),
         const SizedBox(height: 5),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: ratio),
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-            builder: (_, v, _) => LinearProgressIndicator(
-              value: v,
-              minHeight: 7,
-              color: color,
-              backgroundColor: scheme.surfaceContainerHighest,
-            ),
-          ),
-        ),
+        UsageBar(used01: used01, height: 7),
         const SizedBox(height: 3),
         Text(detail, style: t.bodySmall?.copyWith(fontSize: 11, color: scheme.onSurfaceVariant)),
       ],

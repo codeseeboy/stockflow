@@ -113,6 +113,7 @@ class _BalanceScreenState extends State<BalanceScreen> {
                     balance: b,
                     onTap: () => _explain(context, store, b, month),
                   )),
+              const BrandFooter(),
             ],
           ),
         ),
@@ -148,7 +149,6 @@ class _HeadlineCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final scheme = Theme.of(context).colorScheme;
     final ratio = total <= 0 ? 0.0 : (remaining / total).clamp(0.0, 1.0);
 
     return AppCard(
@@ -170,20 +170,9 @@ class _HeadlineCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: ratio),
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.easeOut,
-              builder: (_, v, _) => LinearProgressIndicator(
-                value: v,
-                minHeight: 10,
-                color: AppColors.brand,
-                backgroundColor: scheme.surfaceContainerHighest,
-              ),
-            ),
-          ),
+          UsageBar(used01: 1 - ratio, height: 10),
+          const SizedBox(height: 6),
+          Text('${fmtNum(total - remaining)} used so far', style: t.bodySmall),
           if (carried > 0) ...[
             const SizedBox(height: 10),
             Pill('${fmtNum(carried)} carried from ${month.previous.shortLabel}', color: AppColors.accent, icon: Icons.move_up_rounded),
@@ -206,7 +195,6 @@ class _CategoryRow extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final cat = categoryOf(balance.category);
     final emoji = rikCategoryByName(balance.category)?.emoji ?? '📦';
-    final ratio = balance.total <= 0 ? 0.0 : (balance.remaining / balance.total).clamp(0.0, 1.0);
     final empty = balance.isExhausted;
 
     return Padding(
@@ -224,15 +212,7 @@ class _CategoryRow extends StatelessWidget {
                 children: [
                   Text(balance.category, style: t.titleSmall),
                   const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: LinearProgressIndicator(
-                      value: ratio,
-                      minHeight: 6,
-                      color: empty ? AppColors.warning : cat.color,
-                      backgroundColor: scheme.surfaceContainerHighest,
-                    ),
-                  ),
+                  UsageBar(used01: balance.usedFraction, height: 6),
                 ],
               ),
             ),
@@ -244,10 +224,10 @@ class _CategoryRow extends StatelessWidget {
                   fmtNum(balance.remaining),
                   style: t.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: empty ? AppColors.warning : null,
+                    color: empty ? AppColors.danger : null,
                   ),
                 ),
-                Text('of ${fmtNum(balance.total)} ${balance.unit}', style: t.bodySmall),
+                Text('of ${fmtNum(balance.total)} ${balance.unit} left', style: t.bodySmall),
               ],
             ),
             const SizedBox(width: 4),
@@ -293,7 +273,7 @@ class _ExplainSheet extends StatelessWidget {
   }
 
   String _demandTitle(Order o) =>
-      store.cycles.where((c) => c.id == o.cycleId).firstOrNull?.title ?? 'Order ${o.id}';
+      store.cycles.where((c) => c.id == o.cycleId).firstOrNull?.title ?? 'Order ${o.displayId}';
 
   @override
   Widget build(BuildContext context) {

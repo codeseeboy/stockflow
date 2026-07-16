@@ -53,7 +53,8 @@ class DashboardScreen extends StatelessWidget {
                   ],
                 );
               }),
-              const SizedBox(height: 24),
+              const BrandFooter(),
+              const SizedBox(height: 12),
             ],
           ),
         ),

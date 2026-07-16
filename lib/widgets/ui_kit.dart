@@ -313,6 +313,64 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+/// Faint "StockFlow" mark for the bottom of every page — deliberately quiet.
+class BrandFooter extends StatelessWidget {
+  const BrandFooter({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.45);
+    return Padding(
+      padding: const EdgeInsets.only(top: 28, bottom: 8),
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.inventory_2_outlined, size: 13, color: c),
+            const SizedBox(width: 5),
+            Text('StockFlow', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c, letterSpacing: 0.3)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Traffic-light colour for a usage fraction (0 = untouched, 1 = all used):
+/// green while comfortable, amber past half, red near the limit.
+Color usageColor(double used01) {
+  if (used01 < 0.5) return AppColors.success;
+  if (used01 < 0.85) return AppColors.warning;
+  return AppColors.danger;
+}
+
+/// A usage bar that starts empty and fills left→right as entitlement is
+/// consumed, changing colour green → amber → red.
+class UsageBar extends StatelessWidget {
+  final double used01;
+  final double height;
+  const UsageBar({super.key, required this.used01, this.height = 8});
+
+  @override
+  Widget build(BuildContext context) {
+    final v = used01.clamp(0.0, 1.0);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(height),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: v),
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+        builder: (context, val, _) => LinearProgressIndicator(
+          value: val,
+          minHeight: height,
+          color: usageColor(v),
+          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        ),
+      ),
+    );
+  }
+}
+
 String relTime(DateTime time) {
   final d = DateTime.now().difference(time);
   if (d.inMinutes < 1) return 'just now';

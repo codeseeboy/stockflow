@@ -326,7 +326,7 @@ class _OrderCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(order.customerName, style: t.titleSmall),
-                    Text('${order.id} · ${order.itemCount} items · ${relTime(order.createdAt)}', style: t.bodySmall),
+                    Text('${order.displayId} · ${order.itemCount} items · ${relTime(order.createdAt)}', style: t.bodySmall),
                   ],
                 ),
               ),

@@ -334,9 +334,13 @@ class _Preview extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
             child: Row(
               children: [
-                Text('Preview', style: t.titleMedium),
+                Text('Review before applying', style: t.titleMedium),
                 const SizedBox(width: 8),
                 Pill('${rows.length} items', color: AppColors.brand),
+                if (rows.any((r) => r.qty <= 0)) ...[
+                  const SizedBox(width: 8),
+                  Pill('${rows.where((r) => r.qty <= 0).length} missing qty', color: AppColors.warning, icon: Icons.warning_amber_rounded),
+                ],
               ],
             ),
           ),
@@ -354,13 +358,19 @@ class _Preview extends StatelessWidget {
           ),
           ...rows.take(50).map((r) {
             final cat = categoryOf(r.category);
-            return Padding(
+            final flagged = r.qty <= 0;
+            return Container(
+              color: flagged ? AppColors.warningWash : null,
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
               child: Row(
                 children: [
                   Expanded(
                     flex: 4,
                     child: Row(children: [
+                      if (flagged) ...[
+                        const Icon(Icons.warning_amber_rounded, size: 15, color: AppColors.warning),
+                        const SizedBox(width: 6),
+                      ],
                       Text(r.emoji, style: const TextStyle(fontSize: 16)),
                       const SizedBox(width: 8),
                       Expanded(child: Text(r.name, style: t.titleSmall, overflow: TextOverflow.ellipsis)),
@@ -374,7 +384,14 @@ class _Preview extends StatelessWidget {
                       Flexible(child: Text(r.category, style: t.bodySmall, overflow: TextOverflow.ellipsis)),
                     ]),
                   ),
-                  Expanded(flex: 2, child: Text('${fmtNum(r.qty)} ${r.unit}', style: t.bodySmall, textAlign: TextAlign.end)),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      flagged ? 'no qty' : '${fmtNum(r.qty)} ${r.unit}',
+                      style: t.bodySmall?.copyWith(color: flagged ? AppColors.warning : null, fontWeight: flagged ? FontWeight.w700 : null),
+                      textAlign: TextAlign.end,
+                    ),
+                  ),
                   Expanded(flex: 2, child: Text(fmtNum(r.reorder), style: t.bodySmall, textAlign: TextAlign.end)),
                 ],
               ),

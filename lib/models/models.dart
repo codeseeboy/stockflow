@@ -339,6 +339,9 @@ class Order {
   OrderStatus status;
   final DateTime createdAt;
 
+  /// Server-assigned running number → the human-readable `SF-101` code.
+  final int? orderNo;
+
   Order({
     required this.id,
     required this.cycleId,
@@ -347,10 +350,19 @@ class Order {
     required this.lines,
     required this.status,
     required this.createdAt,
+    this.orderNo,
   });
 
   int get itemCount => lines.length;
   double get totalUnits => lines.fold(0.0, (s, l) => s + l.qty);
+
+  /// Short, readable order code — never the raw UUID.
+  String get displayId {
+    if (orderNo != null) return 'SF-$orderNo';
+    if (id.startsWith('ORD-')) return id.replaceFirst('ORD-', 'SF-');
+    final tail = id.replaceAll('-', '');
+    return 'SF-${tail.substring(0, tail.length < 4 ? tail.length : 4).toUpperCase()}';
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -360,6 +372,7 @@ class Order {
         'lines': lines.map((l) => l.toJson()).toList(),
         'status': status.name,
         'createdAt': createdAt.toIso8601String(),
+        if (orderNo != null) 'orderNo': orderNo,
       };
 
   factory Order.fromJson(Map<String, dynamic> j) => Order(
@@ -372,6 +385,7 @@ class Order {
             .toList(),
         status: OrderStatus.values.byName((j['status'] as String?) ?? 'pending'),
         createdAt: DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
+        orderNo: (j['orderNo'] as num?)?.toInt(),
       );
 }
 

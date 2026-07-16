@@ -16,6 +16,7 @@ import '../../widgets/ui_kit.dart';
 import '../entry_screen.dart';
 import 'balance_screen.dart';
 import 'customer_auth.dart';
+import 'order_detail_screen.dart';
 import 'order_form.dart';
 
 /// The customer-facing app: Home, Order, Balance, Orders, Profile.
@@ -52,7 +53,11 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       // Immediate fetch + safety-net polling so the app stays in sync even if
       // a realtime event is dropped (flaky mobile networks).
       store.reload();
-      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      // Re-fetch the profile so that if an admin updated this customer's zone
+      // in Supabase after their last login, the new designation takes effect
+      // immediately without requiring a sign-out/sign-in.
+      _syncDesignationFromServer(store);
+      _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted) store.reload();
       });
     });
@@ -73,6 +78,50 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
     // event was missed while backgrounded.
     if (state == AppLifecycleState.resumed && mounted) {
       context.read<AppStore>().reload();
+    }
+  }
+
+  /// Pull the latest zone/designation from Supabase and update the locally
+  /// saved profile so the customer sees the correct demand cycles without
+  /// having to sign out and sign back in.
+  Future<void> _syncDesignationFromServer(AppStore store) async {
+    try {
+      final p = await store.myProfile();
+      if (p == null || !mounted) return;
+      final serverZone = p.zone.trim();
+      final saved = SavedProfile.load();
+      if (saved == null) return;
+      if (serverZone != saved.designation.trim()) {
+        SavedProfile(
+          name: saved.name,
+          phone: saved.phone,
+          email: saved.email,
+          address: saved.address,
+          designation: serverZone,
+          guest: saved.guest,
+          accountCreatedAt: saved.accountCreatedAt,
+        ).save();
+        // Restart the shell so openCyclesFor() picks up the new designation.
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            PageRouteBuilder(
+              transitionDuration: const Duration(milliseconds: 300),
+              pageBuilder: (_, _, _) => CustomerShell(
+                name: saved.name,
+                phone: saved.phone,
+                email: saved.email,
+                address: saved.address,
+                designation: serverZone,
+              ),
+              transitionsBuilder: (_, anim, _, child) =>
+                  FadeTransition(opacity: anim, child: child),
+            ),
+            (r) => false,
+          );
+        }
+      }
+    } catch (_) {
+      // Network failure — keep existing designation, silently ignore.
     }
   }
 
@@ -143,7 +192,10 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: (i) {
+          setState(() => _index = i);
+          context.read<AppStore>().reload();
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.add_shopping_cart_outlined), selectedIcon: Icon(Icons.add_shopping_cart_rounded), label: 'Order'),
@@ -331,7 +383,7 @@ List<_Update> _customerUpdates(AppStore store, String name, String phone) {
       'order-${o.id}-${o.status.name}',
       o.status == OrderStatus.fulfilled ? Icons.check_circle_rounded : Icons.local_shipping_rounded,
       orderStatusColor(o.status),
-      'Order ${o.id} is ${orderStatusLabel(o.status).toLowerCase()}',
+      'Order ${o.displayId} is ${orderStatusLabel(o.status).toLowerCase()}',
       '${o.itemCount} items · ${relTime(o.createdAt)}',
     ));
   }
@@ -404,6 +456,7 @@ class _HomeTab extends StatelessWidget {
                 const SizedBox(height: 12),
                 _LastOrderStrip(order: lastOrder),
               ],
+              const BrandFooter(),
             ],
           ),
         ),
@@ -475,15 +528,7 @@ class _BalanceSnapshot extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 7),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: LinearProgressIndicator(
-                    value: ratio,
-                    minHeight: 6,
-                    color: AppColors.brand,
-                    backgroundColor: scheme.surfaceContainerHighest,
-                  ),
-                ),
+                UsageBar(used01: 1 - ratio, height: 6),
               ],
             ),
           ),
@@ -534,12 +579,29 @@ class _OrderStatusCard extends StatelessWidget {
     final open = windows.isNotEmpty && store.items.isNotEmpty;
     final multi = windows.length > 1;
     final cycle = windows.isNotEmpty ? windows.first : null;
-    final closeLine = cycle != null ? DateFormat('d MMM').format(cycle.weekEnd) : '';
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
 
     final washOpen = dark ? AppColors.dSuccessWash : AppColors.successWash;
     final fresh = cycle?.type == DemandType.fresh;
+
+    // Closing moment = end of the demand's last day.
+    final closesAt = cycle == null
+        ? null
+        : DateTime(cycle.weekEnd.year, cycle.weekEnd.month, cycle.weekEnd.day, 23, 59);
+    final closeLine = closesAt == null ? '' : DateFormat('EEE, d MMM · h:mm a').format(closesAt);
+    final leftDur = closesAt?.difference(DateTime.now());
+    final String countdown;
+    if (leftDur == null || leftDur.isNegative) {
+      countdown = 'closing';
+    } else if (leftDur.inDays >= 1) {
+      countdown = '${leftDur.inDays}d ${leftDur.inHours % 24}h left';
+    } else if (leftDur.inHours >= 1) {
+      countdown = '${leftDur.inHours}h ${leftDur.inMinutes % 60}m left';
+    } else {
+      countdown = '${leftDur.inMinutes}m left';
+    }
+    final closingSoon = leftDur != null && leftDur.inHours < 24;
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -582,7 +644,7 @@ class _OrderStatusCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       open
-                          ? (multi ? 'Pick one on the Order tab' : '${cycle!.days} days · closes $closeLine')
+                          ? (multi ? 'Pick one on the Order tab' : 'Covers ${cycle!.days} days of ration')
                           : 'You will be notified when it opens',
                       style: t.bodySmall,
                     ),
@@ -592,8 +654,30 @@ class _OrderStatusCard extends StatelessWidget {
               Pill(open ? 'OPEN' : 'CLOSED', color: open ? AppColors.success : scheme.onSurfaceVariant),
             ],
           ),
+          if (open && !multi && closesAt != null) ...[
+            const SizedBox(height: 12),
+            // The closing moment — highlighted, with a live countdown.
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: (closingSoon ? AppColors.danger : AppColors.success).withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.schedule_rounded, size: 17, color: closingSoon ? AppColors.danger : AppColors.success),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Closes $closeLine', style: t.titleSmall?.copyWith(fontSize: 13)),
+                  ),
+                  Pill(countdown, color: closingSoon ? AppColors.danger : AppColors.success, icon: Icons.hourglass_bottom_rounded),
+                ],
+              ),
+            ),
+          ],
           if (open) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
@@ -619,20 +703,33 @@ class _LastOrderStrip extends StatelessWidget {
 
     return AppCard(
       padding: const EdgeInsets.all(14),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => OrderDetailScreen(order: order)),
+      ),
       child: Row(
         children: [
-          Icon(Icons.receipt_long_rounded, color: scheme.primary, size: 20),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Icon(Icons.receipt_long_rounded, color: scheme.onSurfaceVariant, size: 20),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Last order · ${order.id}', style: t.titleSmall),
-                Text('${order.itemCount} items · ${orderStatusLabel(order.status)}', style: t.bodySmall),
+                Text('Last demand · ${order.displayId}', style: t.titleSmall),
+                Text(DateFormat('d MMM, h:mm a').format(order.createdAt.toLocal()), style: t.bodySmall),
               ],
             ),
           ),
           Pill(orderStatusLabel(order.status), color: orderStatusColor(order.status)),
+          const SizedBox(width: 4),
+          Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
         ],
       ),
     );
@@ -676,7 +773,7 @@ class _MyOrdersTab extends StatelessWidget {
             children: [
               Text('My Orders', style: t.headlineSmall),
               const SizedBox(height: 4),
-              Text('Your orders grouped by week, with status', style: t.bodyMedium),
+              Text('Grouped by demand, newest first', style: t.bodyMedium),
               const SizedBox(height: 16),
               if (orders.isEmpty)
                 Padding(
@@ -694,7 +791,8 @@ class _MyOrdersTab extends StatelessWidget {
                       cycleId: cid,
                       orders: byCycle[cid]!..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
                     )),
-              const SizedBox(height: 16),
+              const BrandFooter(),
+              const SizedBox(height: 8),
             ],
           ),
         ),
@@ -747,6 +845,9 @@ class _WeekGroup extends StatelessWidget {
           ...orders.map((o) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: AppCard(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => OrderDetailScreen(order: o)),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -755,7 +856,7 @@ class _WeekGroup extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(o.id, style: t.titleSmall),
+                              Text(o.displayId, style: t.titleSmall),
                               const SizedBox(height: 2),
                               Text(DateFormat('EEE, d MMM · h:mm a').format(o.createdAt.toLocal()),
                                   style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
@@ -785,7 +886,7 @@ class _WeekGroup extends StatelessWidget {
 
 // ---------------- Profile ----------------
 
-class _ProfileTab extends StatelessWidget {
+class _ProfileTab extends StatefulWidget {
   final String name;
   final String phone;
   final String email;
@@ -793,9 +894,72 @@ class _ProfileTab extends StatelessWidget {
   const _ProfileTab({required this.name, required this.phone, required this.email, required this.address});
 
   @override
+  State<_ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<_ProfileTab> {
+  late String _email = widget.email;
+  late String _address = widget.address;
+
+  /// Edit the contact details. Name and phone stay locked — orders and the
+  /// balance are keyed on them, so changing them would orphan the history.
+  Future<void> _edit() async {
+    final emailCtrl = TextEditingController(text: _email);
+    final addressCtrl = TextEditingController(text: _address);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Update profile'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.mail_outline_rounded)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: addressCtrl,
+              decoration: const InputDecoration(labelText: 'Delivery address', prefixIcon: Icon(Icons.location_on_outlined)),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Name and phone are fixed to your account — ask the admin to change them.',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _email = emailCtrl.text.trim();
+      _address = addressCtrl.text.trim();
+    });
+    final saved = SavedProfile.load();
+    SavedProfile(
+      name: widget.name,
+      phone: widget.phone,
+      email: _email,
+      address: _address,
+      designation: saved?.designation ?? '',
+      guest: saved?.guest ?? false,
+      accountCreatedAt: saved?.accountCreatedAt,
+    ).save();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final theme = context.watch<ThemeController>();
+    final name = widget.name;
+    final zone = SavedProfile.load()?.designation ?? '';
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
@@ -810,17 +974,26 @@ class _ProfileTab extends StatelessWidget {
                   CircleAvatar(radius: 36, backgroundColor: AppColors.brand, child: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 28))),
                   const SizedBox(height: 12),
                   Text(name, style: t.titleLarge),
-                  Text('Customer account', style: t.bodyMedium),
+                  Text(zone.isEmpty ? 'Customer account' : '$zone zone', style: t.bodyMedium),
                 ]),
               ),
               const SizedBox(height: 24),
               AppCard(
                 child: Column(children: [
-                  _row(context, Icons.phone_rounded, 'Phone', phone.isEmpty ? 'Not set' : phone),
+                  Row(children: [
+                    Expanded(child: Text('Contact details', style: t.titleSmall)),
+                    TextButton.icon(
+                      onPressed: _edit,
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text('Edit'),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  _row(context, Icons.phone_rounded, 'Phone', widget.phone.isEmpty ? 'Not set' : widget.phone),
                   const Divider(height: 20),
-                  _row(context, Icons.mail_outline_rounded, 'Email', email.isEmpty ? 'Not set' : email),
+                  _row(context, Icons.mail_outline_rounded, 'Email', _email.isEmpty ? 'Not set' : _email),
                   const Divider(height: 20),
-                  _row(context, Icons.location_on_outlined, 'Delivery address', address.isEmpty ? 'Not set' : address),
+                  _row(context, Icons.location_on_outlined, 'Delivery address', _address.isEmpty ? 'Not set' : _address),
                 ]),
               ),
               const SizedBox(height: 16),
@@ -840,7 +1013,9 @@ class _ProfileTab extends StatelessWidget {
                   onPressed: () async {
                     final store = context.read<AppStore>();
                     SavedProfile.clear();
-                    await store.signOut();
+                    // Leave immediately — the server sign-out finishes in the
+                    // background instead of blocking the button.
+                    unawaited(store.signOut().catchError((Object _) {}));
                     if (!context.mounted) return;
                     if (kIsWeb) {
                       Navigator.of(context).popUntil((r) => r.isFirst);
@@ -856,7 +1031,8 @@ class _ProfileTab extends StatelessWidget {
                   label: const Text('Log out'),
                 ),
               ),
-              const SizedBox(height: 24),
+              const BrandFooter(),
+              const SizedBox(height: 12),
             ],
           ),
         ),
