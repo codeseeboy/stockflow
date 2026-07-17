@@ -156,6 +156,31 @@ class RationZone {
         itemMax: itemMax ?? this.itemMax,
         defaultPerDay: defaultPerDay,
       );
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'level': level,
+        'description': description,
+        'perDay': perDay,
+        'itemMax': itemMax,
+        'defaultPerDay': defaultPerDay,
+      };
+
+  factory RationZone.fromJson(Map<String, dynamic> j) => RationZone(
+        name: (j['name'] as String?) ?? '',
+        level: (j['level'] as String?) ?? '',
+        description: (j['description'] as String?) ?? '',
+        perDay: numMap(j['perDay']),
+        itemMax: numMap(j['itemMax']),
+        defaultPerDay: (j['defaultPerDay'] as num?)?.toDouble() ?? 0.05,
+      );
+}
+
+/// Decodes a jsonb `{key: number}` map (category rates, per-item caps) from
+/// either a JSON-decoded response or a stored jsonb Map straight off Supabase.
+Map<String, double> numMap(dynamic raw) {
+  if (raw is! Map) return {};
+  return raw.map((k, v) => MapEntry(k.toString(), (v as num).toDouble()));
 }
 
 /// The real Officers per-day scale, straight from the RIK sheet.

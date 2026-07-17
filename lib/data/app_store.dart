@@ -74,6 +74,7 @@ class AppStore extends ChangeNotifier {
       itemMax: Map<String, double>.of(base.itemMax),
     );
     notifyListeners();
+    _fire(_sb?.upsertZone(_zones[n]!));
     return true;
   }
 
@@ -82,6 +83,7 @@ class AppStore extends ChangeNotifier {
     if (_zones.length <= 1) return;
     _zones.remove(name);
     notifyListeners();
+    _fire(_sb?.deleteZone(name));
   }
 
   /// Set a category's per-person-per-day entitlement for a zone. Every allowance
@@ -91,12 +93,14 @@ class AppStore extends ChangeNotifier {
     final next = Map<String, double>.of(z.perDay)..[category] = perDay < 0 ? 0 : perDay;
     _zones[z.name] = z.copyWith(perDay: next);
     notifyListeners();
+    _fire(_sb?.upsertZone(_zones[z.name]!));
   }
 
   void setZoneDescription(String zone, String description) {
     final z = zoneFor(zone);
     _zones[z.name] = z.copyWith(description: description.trim());
     notifyListeners();
+    _fire(_sb?.upsertZone(_zones[z.name]!));
   }
 
   void setZoneItemMax(String zone, String itemName, double value) {
@@ -109,6 +113,7 @@ class AppStore extends ChangeNotifier {
     }
     _zones[z.name] = z.copyWith(itemMax: next);
     notifyListeners();
+    _fire(_sb?.upsertZone(_zones[z.name]!));
   }
 
   /// Apply an entitlement sheet (the unit's Excel) to a zone.
@@ -128,6 +133,7 @@ class AppStore extends ChangeNotifier {
     }
     _zones[z.name] = z.copyWith(perDay: perDay);
     notifyListeners();
+    _fire(_sb?.upsertZone(_zones[z.name]!));
     return EntitlementImportSummary(updated: updated, skipped: skipped);
   }
 
@@ -208,6 +214,7 @@ class AppStore extends ChangeNotifier {
   static const _cacheOrdersKey = 'cache_orders_v1';
   static const _cacheBroadcastsKey = 'cache_broadcasts_v1';
   static const _cacheUsersKey = 'cache_users_v1';
+  static const _cacheZonesKey = 'cache_zones_v1';
 
   void _persistCache() {
     try {
@@ -216,6 +223,7 @@ class AppStore extends ChangeNotifier {
       AppPrefs.setString(_cacheOrdersKey, jsonEncode(orders.map((e) => e.toJson()).toList()));
       AppPrefs.setString(_cacheBroadcastsKey, jsonEncode(customerBroadcasts.map((e) => e.toJson()).toList()));
       AppPrefs.setString(_cacheUsersKey, jsonEncode(users.map((e) => e.toJson()).toList()));
+      AppPrefs.setString(_cacheZonesKey, jsonEncode(_zones.values.map((e) => e.toJson()).toList()));
     } catch (_) {
       // Caching is a nice-to-have — never let a serialization hiccup affect
       // the live in-memory data the UI is actually reading from.
@@ -262,6 +270,12 @@ class AppStore extends ChangeNotifier {
       users
         ..clear()
         ..addAll(cachedUsers);
+    }
+    final cachedZones = _readCache(_cacheZonesKey, RationZone.fromJson);
+    if (cachedZones.isNotEmpty) {
+      _zones
+        ..clear()
+        ..addEntries(cachedZones.map((z) => MapEntry(z.name, z)));
     }
   }
 
@@ -323,6 +337,23 @@ class AppStore extends ChangeNotifier {
       try {
         fetchedBroadcasts = await sb.fetchBroadcasts();
       } catch (_) {}
+      List<RationZone> fetchedZones = const [];
+      try {
+        fetchedZones = await sb.fetchZones();
+      } catch (_) {}
+      if (fetchedZones.isNotEmpty) {
+        _zones
+          ..clear()
+          ..addEntries(fetchedZones.map((z) => MapEntry(z.name, z)));
+      } else {
+        // Fresh zones table (or a fetch hiccup) — push what's already in
+        // memory (the hardcoded Officers default, or whatever the admin set
+        // up this session) so it becomes the persisted baseline instead of
+        // vanishing on the next reload/page refresh.
+        for (final z in _zones.values) {
+          _fire(sb.upsertZone(z));
+        }
+      }
 
       // Cheap fingerprint: skip notifyListeners() when nothing meaningful changed.
       // This prevents a full UI rebuild when a debounced realtime event refetches

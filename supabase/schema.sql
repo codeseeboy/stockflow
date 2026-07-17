@@ -39,6 +39,22 @@ create table if not exists profiles (
   created_at  timestamptz not null default now()
 );
 
+-- ---------- Zones (designations + their entitlement scale) ----------
+-- Previously lived only in the app's in-memory state — every zone beyond the
+-- hardcoded Officers default vanished on the next page reload (a real problem
+-- for the web admin console, which re-runs from scratch on every refresh).
+-- name is the primary key: it's what every other table's zone/designation
+-- column actually stores.
+create table if not exists zones (
+  name            text primary key,
+  level           text not null default '',
+  description     text not null default '',
+  per_day         jsonb not null default '{}'::jsonb,   -- {category: perDayRate}
+  item_max        jsonb not null default '{}'::jsonb,   -- {itemName: maxUnits}
+  default_per_day numeric not null default 0.05,
+  created_at      timestamptz not null default now()
+);
+
 -- ---------- Items (master stock + live qty) ----------
 -- zone scopes an item to one designation's own stock pool — Officers' rice
 -- and Sailors' rice are separate rows with separate quantities, never one
@@ -158,12 +174,20 @@ $$;
 -- personal data" privacy rule.
 -- ============================================================
 alter table profiles        enable row level security;
+alter table zones           enable row level security;
 alter table items           enable row level security;
 alter table stock_movements enable row level security;
 alter table order_cycles    enable row level security;
 alter table orders          enable row level security;
 alter table order_items     enable row level security;
 alter table customer_broadcasts enable row level security;
+
+-- Zones: anyone can READ (a customer's own Balance tab needs their zone's
+-- entitlement rates); staff WRITE
+drop policy if exists zones_read on zones;
+create policy zones_read on zones for select using (true);
+drop policy if exists zones_write on zones;
+create policy zones_write on zones for all using (is_staff()) with check (is_staff());
 
 -- Broadcasts: anyone can READ (customer app); staff can insert
 drop policy if exists broadcasts_read on customer_broadcasts;
@@ -324,6 +348,9 @@ where o.customer_id is null
 -- Realtime: broadcast item/stock changes so every open page
 -- updates live.
 -- ============================================================
+do $$ begin
+  alter publication supabase_realtime add table zones;
+exception when duplicate_object then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table items;
 exception when duplicate_object then null; end $$;

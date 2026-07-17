@@ -1,12 +1,18 @@
 -- ============================================================
 -- StockFlow — FULL RESET (fresh install state)
 --
--- Deletes every item, demand/order-cycle, order (and its status
--- timeline), stock movement, broadcast, and customer account —
--- there is nothing left to compute a balance or entitlement
--- from, so those reset to zero automatically; they are not
--- stored separately. Also restarts the SF-xxx order numbering
+-- Deletes every item, zone (entitlement scale), demand/order-cycle,
+-- order (and its status timeline), stock movement, broadcast, and
+-- customer account — there is nothing left to compute a balance or
+-- entitlement from, so those reset to zero automatically; they are
+-- not stored separately. Also restarts the SF-xxx order numbering
 -- at 1. Admin/staff logins are KEPT so you can still sign in.
+--
+-- Zones: after this runs, the app's next reload finds the zones
+-- table empty and re-seeds the built-in "Officers" default on its
+-- own — you don't need to recreate it by hand. Every other zone you
+-- had (Sailors, Commanders, …) is gone; set those up again from the
+-- Zones page once you're back in.
 --
 --   Supabase → SQL Editor → New query → paste all of this → Run.
 --
@@ -26,6 +32,7 @@ delete from stock_movements;
 delete from customer_broadcasts;
 delete from order_cycles;
 delete from items;
+delete from zones;
 
 -- Fresh SF-1, SF-2… numbering after the reset, not a continuation
 -- of whatever test orders existed before.

@@ -114,6 +114,24 @@ class SupabaseService {
 
   // ---- Fetch -------------------------------------------------------------
 
+  Future<List<RationZone>> fetchZones() async {
+    final rows = await client.from('zones').select().order('name');
+    return rows.map<RationZone>(_zone).toList();
+  }
+
+  /// Create or update a zone's entitlement scale. name is the primary key —
+  /// renaming a zone (if that's ever allowed) would need a delete + insert.
+  Future<void> upsertZone(RationZone zone) => client.from('zones').upsert({
+        'name': zone.name,
+        'level': zone.level,
+        'description': zone.description,
+        'per_day': zone.perDay,
+        'item_max': zone.itemMax,
+        'default_per_day': zone.defaultPerDay,
+      });
+
+  Future<void> deleteZone(String name) => client.from('zones').delete().eq('name', name);
+
   Future<List<Item>> fetchItems() async {
     final rows = await client.from('items').select().order('name');
     return rows.map<Item>(_item).toList();
@@ -331,6 +349,15 @@ class SupabaseService {
   }
 
   // ---- Mappers -----------------------------------------------------------
+
+  RationZone _zone(Map<String, dynamic> r) => RationZone(
+        name: (r['name'] as String?) ?? '',
+        level: (r['level'] as String?) ?? '',
+        description: (r['description'] as String?) ?? '',
+        perDay: numMap(r['per_day']),
+        itemMax: numMap(r['item_max']),
+        defaultPerDay: r['default_per_day'] == null ? 0.05 : _d(r['default_per_day']),
+      );
 
   Item _item(Map<String, dynamic> r) {
     final name = (r['name'] as String?) ?? '';
