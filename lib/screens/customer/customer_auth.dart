@@ -53,7 +53,7 @@ void enterCustomerApp(
   ).save();
   final Widget target = (isNewUser && !SavedProfile.onboardingDone)
       ? OnboardingScreen(name: name, phone: phone, email: email, address: address, designation: desig)
-      : CustomerShell(name: name, phone: phone, email: email, address: address, designation: desig);
+      : CustomerShell(name: name, phone: phone, email: email, address: address, designation: desig, isNewUser: isNewUser);
   final route = PageRouteBuilder(
     transitionDuration: const Duration(milliseconds: 420),
     pageBuilder: (context, animation, secondaryAnimation) => target,
@@ -660,7 +660,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
       _error = null;
     });
     try {
-      await store.signUpCustomer(_email.text.trim(), _password.text, name, _phone.text.trim());
+      await store.signUpCustomer(_email.text.trim(), _password.text, name, _phone.text.trim(), zone: _zone);
       if (!mounted) return;
       enterCustomerApp(context,
           name: name,

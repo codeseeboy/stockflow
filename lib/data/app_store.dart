@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
@@ -173,14 +174,88 @@ class AppStore extends ChangeNotifier {
   Future<void> connectSupabase(SupabaseService sb) async {
     _sb = sb;
     await sb.restoreSession();
+    // Show whatever was on-screen last session immediately — the network
+    // fetch below can be slow or fail outright on a bad connection, and the
+    // app should never sit blank just because it's offline.
+    _hydrateFromCache();
     _bootstrapped = true;
-    // reload() will call notifyListeners() once everything is fetched —
-    // no need for an extra notifyListeners() here that would cause a blank flash.
+    notifyListeners();
+    // reload() will call notifyListeners() again once fresh data lands —
+    // harmless if it's a no-op repaint when nothing actually changed.
     await reload();
     sb.subscribe(() {
       _reloadDebounce?.cancel();
       _reloadDebounce = Timer(const Duration(milliseconds: 700), () => reload());
     });
+  }
+
+  // ---- Offline cache --------------------------------------------------
+  //
+  // The app must stay usable on a flaky or absent connection — not just
+  // "not crash", but actually show the last data it had. Every successful
+  // reload() snapshots items/cycles/orders/broadcasts/users to disk; the next
+  // cold start (or a fully offline one) reads that snapshot back before the
+  // network call even has a chance to time out.
+  static const _cacheItemsKey = 'cache_items_v1';
+  static const _cacheCyclesKey = 'cache_cycles_v1';
+  static const _cacheOrdersKey = 'cache_orders_v1';
+  static const _cacheBroadcastsKey = 'cache_broadcasts_v1';
+  static const _cacheUsersKey = 'cache_users_v1';
+
+  void _persistCache() {
+    try {
+      AppPrefs.setString(_cacheItemsKey, jsonEncode(items.map((e) => e.toJson()).toList()));
+      AppPrefs.setString(_cacheCyclesKey, jsonEncode(cycles.map((e) => e.toJson()).toList()));
+      AppPrefs.setString(_cacheOrdersKey, jsonEncode(orders.map((e) => e.toJson()).toList()));
+      AppPrefs.setString(_cacheBroadcastsKey, jsonEncode(customerBroadcasts.map((e) => e.toJson()).toList()));
+      AppPrefs.setString(_cacheUsersKey, jsonEncode(users.map((e) => e.toJson()).toList()));
+    } catch (_) {
+      // Caching is a nice-to-have — never let a serialization hiccup affect
+      // the live in-memory data the UI is actually reading from.
+    }
+  }
+
+  List<T> _readCache<T>(String key, T Function(Map<String, dynamic>) fromJson) {
+    final raw = AppPrefs.getString(key);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      return (jsonDecode(raw) as List).map((e) => fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void _hydrateFromCache() {
+    final cachedItems = _readCache(_cacheItemsKey, Item.fromJson);
+    if (cachedItems.isNotEmpty) {
+      items
+        ..clear()
+        ..addAll(cachedItems);
+    }
+    final cachedCycles = _readCache(_cacheCyclesKey, OrderCycle.fromJson);
+    if (cachedCycles.isNotEmpty) {
+      cycles
+        ..clear()
+        ..addAll(cachedCycles);
+    }
+    final cachedOrders = _readCache(_cacheOrdersKey, Order.fromJson);
+    if (cachedOrders.isNotEmpty) {
+      orders
+        ..clear()
+        ..addAll(cachedOrders);
+    }
+    final cachedBroadcasts = _readCache(_cacheBroadcastsKey, CustomerBroadcast.fromJson);
+    if (cachedBroadcasts.isNotEmpty) {
+      customerBroadcasts
+        ..clear()
+        ..addAll(cachedBroadcasts);
+    }
+    final cachedUsers = _readCache(_cacheUsersKey, AppUser.fromJson);
+    if (cachedUsers.isNotEmpty) {
+      users
+        ..clear()
+        ..addAll(cachedUsers);
+    }
   }
 
   /// True when running on Supabase (live) — admin/staff must sign in to write.
@@ -202,11 +277,14 @@ class AppStore extends ChangeNotifier {
   /// Role of the signed-in user, from their profile.
   Future<UserRole?> currentRole() => _sb?.fetchMyRole() ?? Future.value(null);
 
-  /// Register a customer account (no-op in demo mode).
-  Future<void> signUpCustomer(String email, String password, String name, String phone) async {
+  /// Register a customer account (no-op in demo mode). The zone must be sent
+  /// at signup — otherwise the server-side profile starts with an empty zone,
+  /// which immediately disagrees with what was just saved locally and forces
+  /// an unwanted shell rebuild the moment the app syncs the profile back.
+  Future<void> signUpCustomer(String email, String password, String name, String phone, {String zone = ''}) async {
     final sb = _sb;
     if (sb == null) return;
-    await sb.signUpCustomer(email, password, name, phone);
+    await sb.signUpCustomer(email, password, name, phone, zone: zone);
   }
 
   /// The signed-in user's profile (name/phone), if any.
@@ -272,6 +350,7 @@ class AppStore extends ChangeNotifier {
       cycles
         ..clear()
         ..addAll(fetchedCycles);
+      _persistCache();
       // Only repaint the entire widget tree if data actually changed.
       if (!same) notifyListeners();
     } catch (_) {

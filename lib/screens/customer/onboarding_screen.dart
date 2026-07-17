@@ -61,6 +61,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           email: widget.email,
           address: widget.address,
           designation: widget.designation,
+          isNewUser: true,
         ),
         transitionsBuilder: (_, anim, _, child) => FadeTransition(
           opacity: CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),

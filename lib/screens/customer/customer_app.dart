@@ -29,7 +29,19 @@ class CustomerShell extends StatefulWidget {
   final String email;
   final String address;
   final String designation;
-  const CustomerShell({super.key, required this.name, required this.phone, this.email = '', this.address = '', this.designation = ''});
+  // Only true for the mount right after a brand-new signup completes — the
+  // guided tour auto-starts once for that specific mount, never for a
+  // returning user logging back in.
+  final bool isNewUser;
+  const CustomerShell({
+    super.key,
+    required this.name,
+    required this.phone,
+    this.email = '',
+    this.address = '',
+    this.designation = '',
+    this.isNewUser = false,
+  });
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -66,15 +78,17 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted) store.reload();
       });
-      // Auto-start temporarily disabled — it's been trapping users on a
-      // dimmed screen despite two rounds of fixes, and the safest thing to
-      // do while that's being root-caused properly is not show it at all.
-      // Re-enable this block once the freeze is confirmed fixed.
-      // if (!TourPrefs.seen) {
-      //   Future<void>.delayed(const Duration(milliseconds: 500), () {
-      //     if (mounted) _tour.start(buildAppTour());
-      //   });
-      // }
+      // Auto-start only right after a brand-new signup (never on a returning
+      // login) and only the first time ever on this device. The earlier
+      // freeze traced back to signup leaving the profile's zone unset on the
+      // server, which made the very next sync think it had changed and
+      // rebuild this whole shell mid-tour — now fixed at the source in
+      // signUpCustomer, so the tour no longer races a surprise rebuild.
+      if (widget.isNewUser && !TourPrefs.seen) {
+        Future<void>.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) _tour.start(buildAppTour());
+        });
+      }
     });
   }
 
@@ -1362,8 +1376,15 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
                 ),
               ),
-              // The guided tour is temporarily switched off while a display
-              // issue is being fixed properly — nothing here can trigger it.
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: widget.onReplayTour,
+                  icon: const Icon(Icons.explore_outlined, size: 18),
+                  label: const Text('Replay app tour'),
+                ),
+              ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,

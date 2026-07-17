@@ -66,7 +66,7 @@ class SupabaseService {
   /// `signUp` response parsing can be flaky (it sometimes throws a null-check
   /// even when the account is created), so we swallow that and then establish
   /// a real session via sign-in, which surfaces any genuine error clearly.
-  Future<void> signUpCustomer(String email, String password, String name, String phone) async {
+  Future<void> signUpCustomer(String email, String password, String name, String phone, {String zone = ''}) async {
     // With implicit flow this completes cleanly and sets a session (email
     // confirmation is off). Genuine errors (weak password, already registered)
     // surface as AuthException for the UI to show.
@@ -79,11 +79,11 @@ class SupabaseService {
     final uid = client.auth.currentUser?.id;
     if (uid != null) {
       try {
-        await client.from('profiles').upsert({'id': uid, 'name': name, 'role': 'customer', 'phone': phone, 'email': email});
+        await client.from('profiles').upsert({'id': uid, 'name': name, 'role': 'customer', 'phone': phone, 'email': email, 'zone': zone});
       } catch (_) {
         // Older schema without the email column — retry without it.
         try {
-          await client.from('profiles').upsert({'id': uid, 'name': name, 'role': 'customer', 'phone': phone});
+          await client.from('profiles').upsert({'id': uid, 'name': name, 'role': 'customer', 'phone': phone, 'zone': zone});
         } catch (_) {}
       }
     }

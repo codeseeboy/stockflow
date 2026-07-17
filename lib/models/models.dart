@@ -219,6 +219,28 @@ class Item {
   }
 
   Category get cat => categoryOf(category);
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'emoji': emoji,
+        'category': category,
+        'unit': unit,
+        'openingQty': openingQty,
+        'currentQty': currentQty,
+        'reorderLevel': reorderLevel,
+      };
+
+  factory Item.fromJson(Map<String, dynamic> j) => Item(
+        id: (j['id'] as String?) ?? '',
+        name: (j['name'] as String?) ?? '',
+        emoji: (j['emoji'] as String?) ?? '📦',
+        category: (j['category'] as String?) ?? '',
+        unit: (j['unit'] as String?) ?? '',
+        openingQty: (j['openingQty'] as num?)?.toDouble() ?? 0,
+        currentQty: (j['currentQty'] as num?)?.toDouble() ?? 0,
+        reorderLevel: (j['reorderLevel'] as num?)?.toDouble() ?? 0,
+      );
 }
 
 class AppUser {
@@ -238,6 +260,26 @@ class AppUser {
     this.email = '',
     this.zone = '',
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'role': role.name,
+        'phone': phone,
+        'unit': unit,
+        'email': email,
+        'zone': zone,
+      };
+
+  factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
+        id: (j['id'] as String?) ?? '',
+        name: (j['name'] as String?) ?? '',
+        role: UserRole.values.byName((j['role'] as String?) ?? 'customer'),
+        phone: (j['phone'] as String?) ?? '',
+        unit: (j['unit'] as String?) ?? '',
+        email: (j['email'] as String?) ?? '',
+        zone: (j['zone'] as String?) ?? '',
+      );
 }
 
 /// A demand window — what the unit calls "opening the demand".
@@ -320,6 +362,34 @@ class OrderCycle {
         days: days ?? this.days,
         month: month ?? this.month,
         itemIds: itemIds ?? this.itemIds,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'weekStart': weekStart.toIso8601String(),
+        'weekEnd': weekEnd.toIso8601String(),
+        'status': status.name,
+        'shareToken': shareToken,
+        'designation': designation,
+        'type': type.name,
+        'days': days,
+        'month': month.key,
+        'itemIds': itemIds.toList(),
+      };
+
+  factory OrderCycle.fromJson(Map<String, dynamic> j) => OrderCycle(
+        id: (j['id'] as String?) ?? '',
+        title: (j['title'] as String?) ?? '',
+        weekStart: DateTime.tryParse(j['weekStart']?.toString() ?? '') ?? DateTime.now(),
+        weekEnd: DateTime.tryParse(j['weekEnd']?.toString() ?? '') ?? DateTime.now(),
+        status: CycleStatus.values.byName((j['status'] as String?) ?? 'draft'),
+        shareToken: (j['shareToken'] as String?) ?? '',
+        designation: (j['designation'] as String?) ?? '',
+        type: DemandType.values.byName((j['type'] as String?) ?? 'fresh'),
+        days: (j['days'] as num?)?.toInt(),
+        month: RationMonth.tryParse((j['month'] as String?) ?? ''),
+        itemIds: ((j['itemIds'] as List?) ?? const []).map((e) => e.toString()).toSet(),
       );
 }
 
@@ -452,6 +522,30 @@ class CustomerBroadcast {
     required this.recipientCount,
     this.itemEmoji,
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'body': body,
+        'sentAt': sentAt.toIso8601String(),
+        'inApp': inApp,
+        'sms': sms,
+        'whatsapp': whatsapp,
+        'recipientCount': recipientCount,
+        if (itemEmoji != null) 'itemEmoji': itemEmoji,
+      };
+
+  factory CustomerBroadcast.fromJson(Map<String, dynamic> j) => CustomerBroadcast(
+        id: (j['id'] as String?) ?? '',
+        title: (j['title'] as String?) ?? '',
+        body: (j['body'] as String?) ?? '',
+        sentAt: DateTime.tryParse(j['sentAt']?.toString() ?? '') ?? DateTime.now(),
+        inApp: (j['inApp'] as bool?) ?? true,
+        sms: (j['sms'] as bool?) ?? false,
+        whatsapp: (j['whatsapp'] as bool?) ?? false,
+        recipientCount: (j['recipientCount'] as num?)?.toInt() ?? 0,
+        itemEmoji: j['itemEmoji'] as String?,
+      );
 }
 
 /// Per-customer delivery status (SMS / WhatsApp / email / in-app).
