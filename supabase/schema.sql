@@ -8,8 +8,17 @@ do $$ begin
   create type user_role    as enum ('admin','worker','customer');
 exception when duplicate_object then null; end $$;
 do $$ begin
-  create type order_status as enum ('pending','confirmed','fulfilled','cancelled');
+  create type order_status as enum ('pending','viewed','accepted','rejected','processing','fulfilled','cancelled');
 exception when duplicate_object then null; end $$;
+-- Existing databases keep whatever values order_status already had (the
+-- do-block above skips creation once the type exists) — add any missing
+-- ones so the fuller lifecycle works there too. ALTER TYPE ADD VALUE can't
+-- run inside a DO/PL-pgSQL block, so these are bare top-level statements;
+-- IF NOT EXISTS makes each safe to re-run.
+alter type order_status add value if not exists 'viewed';
+alter type order_status add value if not exists 'accepted';
+alter type order_status add value if not exists 'rejected';
+alter type order_status add value if not exists 'processing';
 do $$ begin
   create type cycle_status as enum ('draft','open','closed');
 exception when duplicate_object then null; end $$;

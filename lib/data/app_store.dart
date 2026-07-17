@@ -654,6 +654,7 @@ class AppStore extends ChangeNotifier {
       throw StateError('Nothing could be added — check item availability and try again.');
     }
     final localId = 'ORD-${_orderSeq++}';
+    final placedAt = DateTime.now();
     final order = Order(
       id: localId,
       cycleId: targetCycleId,
@@ -661,7 +662,8 @@ class AppStore extends ChangeNotifier {
       customerPhone: customerPhone,
       lines: lines,
       status: OrderStatus.pending,
-      createdAt: DateTime.now(),
+      createdAt: placedAt,
+      history: [OrderStatusEvent(status: OrderStatus.pending, at: placedAt, by: customerName)],
     );
     orders.insert(0, order);
     SavedCustomerOrders.upsert(customerName, customerPhone, order);
@@ -681,6 +683,7 @@ class AppStore extends ChangeNotifier {
           lines: order.lines,
           status: order.status,
           createdAt: order.createdAt,
+          history: order.history,
         );
         if (idx >= 0) {
           orders[idx] = synced;
@@ -831,10 +834,37 @@ class AppStore extends ChangeNotifier {
     );
   }
 
-  void updateOrderStatus(Order order, OrderStatus status) {
-    order.status = status;
+  /// Move an order to a new status, recording who did it and when — the
+  /// timeline a customer sees is built entirely from this history.
+  void updateOrderStatus(Order order, OrderStatus status, {String? actor}) {
+    final by = actor ?? SavedAdminSession.load()?.email ?? 'Admin';
+    final idx = orders.indexWhere((o) => o.id == order.id);
+    if (idx < 0) return;
+    final current = orders[idx];
+    // No duplicate event if this status is already the latest one.
+    if (current.history.isNotEmpty && current.history.last.status == status) return;
+    final event = OrderStatusEvent(status: status, at: DateTime.now(), by: by);
+    final updated = Order(
+      id: current.id,
+      cycleId: current.cycleId,
+      customerName: current.customerName,
+      customerPhone: current.customerPhone,
+      lines: current.lines,
+      status: status,
+      createdAt: current.createdAt,
+      orderNo: current.orderNo,
+      history: [...current.timeline, event],
+    );
+    orders[idx] = updated;
     notifyListeners();
-    _fire(_sb?.updateOrderStatus(order.id, status));
+    _fire(_sb?.updateOrderStatus(updated.id, status, history: updated.history));
+  }
+
+  /// Silent transition to "viewed" the first time an admin opens an order
+  /// that's still pending — never overrides an explicit accept/reject.
+  void markOrderViewed(Order order) {
+    if (order.status != OrderStatus.pending) return;
+    updateOrderStatus(order, OrderStatus.viewed);
   }
 
   /// Apply an uploaded master-stock file.
@@ -1057,8 +1087,11 @@ class AppStore extends ChangeNotifier {
   // ---- Seed ---------------------------------------------------------------
 
   void _seed() {
-    // Build the catalogue from the real RIK Officers scale. Stock is effectively
-    // unlimited (ration) so quantities are set high and never shown to customers.
+    // Build the catalogue from the real RIK Officers scale — this is the
+    // actual entitlement specification, not demo content, so it's what local
+    // offline preview runs on (flutter run -d chrome without Supabase
+    // configured). No fake users, demands or orders are seeded: those would
+    // be demo data, and the app must start genuinely empty otherwise.
     var idx = 0;
     for (final cat in kRikOfficers) {
       for (final a in cat.articles) {
@@ -1074,69 +1107,5 @@ class AppStore extends ChangeNotifier {
         ));
       }
     }
-
-    users.addAll(const [
-      AppUser(id: 'U1', name: 'Cdr Arjun Mehta', role: UserRole.admin, phone: '+91 98200 11001', unit: 'Logistics'),
-      AppUser(id: 'U2', name: 'PO Priya Nair', role: UserRole.worker, phone: '+91 98200 11002', unit: 'Ration Store'),
-      AppUser(id: 'U3', name: 'LS Rahul Verma', role: UserRole.worker, phone: '+91 98200 11003', unit: 'Ration Store'),
-      AppUser(id: 'U4', name: 'Wardroom Mess', role: UserRole.customer, phone: '+91 90000 22001', unit: 'Wardroom', zone: 'Officers'),
-      AppUser(id: 'U5', name: 'Lt Bravo', role: UserRole.customer, phone: '+91 90000 22002', unit: 'OM Block A', zone: 'Officers'),
-      AppUser(id: 'U6', name: 'Lt Cdr Delta', role: UserRole.customer, phone: '+91 90000 22003', unit: 'OM Block B', zone: 'Officers'),
-      AppUser(id: 'U7', name: 'Sub Lt Charlie', role: UserRole.customer, phone: '+91 90000 22004', unit: 'OM Block C', zone: 'Officers'),
-    ]);
-
-    // The month's demand cycle as the unit runs it: three fresh demands of
-    // ~10 days each, then one dry demand covering the whole month.
-    final now = DateTime.now();
-    final m = RationMonth.of(now);
-    final prev = m.previous;
-
-    cycles.addAll([
-      OrderCycle(
-        id: 'CY-${m.key}-fresh-2', title: '2nd fresh demand · ${m.shortLabel} · Officers',
-        weekStart: m.firstDay.add(const Duration(days: 10)), weekEnd: m.firstDay.add(const Duration(days: 19)),
-        status: CycleStatus.open, shareToken: 'rikfresh2', designation: 'Officers',
-        type: DemandType.fresh, days: 10, month: m,
-      ),
-      OrderCycle(
-        id: 'CY-${m.key}-fresh-1', title: '1st fresh demand · ${m.shortLabel} · Officers',
-        weekStart: m.firstDay, weekEnd: m.firstDay.add(const Duration(days: 9)),
-        status: CycleStatus.closed, shareToken: 'rikfresh1', designation: 'Officers',
-        type: DemandType.fresh, days: 10, month: m,
-      ),
-      OrderCycle(
-        id: 'CY-${prev.key}-dry-1', title: '1st dry demand · ${prev.shortLabel} · Officers',
-        weekStart: prev.firstDay, weekEnd: prev.lastDay,
-        status: CycleStatus.closed, shareToken: 'rikdry0', designation: 'Officers',
-        type: DemandType.dry, days: prev.days, month: prev,
-      ),
-    ]);
-
-    Item pick(String name) => items.firstWhere((i) => i.name == name, orElse: () => items.first);
-    OrderLine line(String name, double qty) {
-      final it = pick(name);
-      return OrderLine(itemId: it.id, name: it.name, emoji: it.emoji, unit: it.unit, qty: qty);
-    }
-
-    orders.addAll([
-      // Fresh demand: bread comes out of the Cereals balance, so the dry demand
-      // later in the month sees a smaller Cereals balance.
-      Order(
-        id: 'ORD-${_orderSeq++}', cycleId: 'CY-${m.key}-fresh-1', customerName: 'Wardroom Mess', customerPhone: '+91 90000 22001',
-        status: OrderStatus.confirmed, createdAt: m.firstDay.add(const Duration(days: 1)),
-        lines: [line('Brown Bread 400 g', 1.2), line('Meat Fresh 1 kg', 1.5), line('Tomato', 1), line('Eggs', 14)],
-      ),
-      Order(
-        id: 'ORD-${_orderSeq++}', cycleId: 'CY-${m.key}-fresh-1', customerName: 'Lt Bravo', customerPhone: '+91 90000 22002',
-        status: OrderStatus.pending, createdAt: m.firstDay.add(const Duration(days: 2)),
-        lines: [line('Potato', 0.75), line('Onion', 0.4), line('Apple Delicious', 1.6)],
-      ),
-      // Last month's dry demand — its leftover carries into this month.
-      Order(
-        id: 'ORD-${_orderSeq++}', cycleId: 'CY-${prev.key}-dry-1', customerName: 'Lt Cdr Delta', customerPhone: '+91 90000 22003',
-        status: OrderStatus.fulfilled, createdAt: prev.firstDay.add(const Duration(days: 3)),
-        lines: [line('India Gate Rozana 1 kg', 3), line('Dal Arhar 400 g', 0.8)],
-      ),
-    ]);
   }
 }

@@ -95,10 +95,16 @@ class OrderDetailScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 20),
+                Text('Order timeline', style: t.titleMedium),
+                const SizedBox(height: 4),
+                Text('Where this demand stands, and who moved it there', style: t.bodySmall),
+                const SizedBox(height: 10),
+                AppCard(child: _OrderTimeline(order: order)),
+                const SizedBox(height: 20),
                 OutlinedButton.icon(
                   onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                  label: const Text('Back to orders'),
+                  label: const Text('Back'),
                 ),
                 const BrandFooter(),
               ],
@@ -118,6 +124,129 @@ class OrderDetailScreen extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(child: Text(text, style: t.bodyMedium)),
       ],
+    );
+  }
+}
+
+/// Created → Submitted → Viewed by admin → Accepted → Processing → Fulfilled
+/// (or Rejected), each with exactly who and exactly when — so the customer
+/// always knows where their demand stands without asking anyone.
+class _OrderTimeline extends StatelessWidget {
+  final Order order;
+  const _OrderTimeline({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final history = order.timeline;
+    final byStatus = {for (final e in history) e.status: e};
+    final terminal = order.status == OrderStatus.rejected || order.status == OrderStatus.cancelled;
+
+    // The main sequence, up to wherever this order actually is; a rejection
+    // or cancellation branches off instead of continuing it.
+    final steps = <_TimelineStep>[];
+    for (final s in kOrderStatusSequence) {
+      final event = byStatus[s];
+      if (event != null) {
+        steps.add(_TimelineStep(status: s, event: event, done: true));
+      } else if (terminal && s != OrderStatus.pending) {
+        // Nothing beyond submission happened before it was rejected/cancelled.
+        break;
+      } else {
+        steps.add(_TimelineStep(status: s, event: null, done: false));
+      }
+    }
+    if (terminal) {
+      steps.add(_TimelineStep(status: order.status, event: byStatus[order.status], done: true));
+    }
+
+    return Column(
+      children: [
+        for (var i = 0; i < steps.length; i++)
+          _TimelineTile(step: steps[i], isLast: i == steps.length - 1),
+      ],
+    );
+  }
+}
+
+class _TimelineStep {
+  final OrderStatus status;
+  final OrderStatusEvent? event;
+  final bool done;
+  const _TimelineStep({required this.status, required this.event, required this.done});
+}
+
+class _TimelineTile extends StatelessWidget {
+  final _TimelineStep step;
+  final bool isLast;
+  const _TimelineTile({required this.step, required this.isLast});
+
+  String _label(OrderStatus s) => switch (s) {
+        OrderStatus.pending => 'Submitted by you',
+        OrderStatus.viewed => 'Viewed by admin',
+        OrderStatus.accepted => 'Accepted',
+        OrderStatus.processing => 'Processing',
+        OrderStatus.fulfilled => 'Fulfilled',
+        OrderStatus.rejected => 'Rejected',
+        OrderStatus.cancelled => 'Cancelled',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final color = step.done ? orderStatusColor(step.status) : scheme.outline;
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: step.done ? color.withValues(alpha: 0.14) : Colors.transparent,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color, width: step.done ? 0 : 1.4),
+                ),
+                child: Icon(
+                  step.done ? orderStatusIcon(step.status) : Icons.circle_outlined,
+                  size: 14,
+                  color: color,
+                ),
+              ),
+              if (!isLast) Expanded(child: Container(width: 2, color: scheme.outline.withValues(alpha: 0.5))),
+            ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 18, top: 2),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _label(step.status),
+                    style: t.titleSmall?.copyWith(
+                      fontWeight: step.done ? FontWeight.w700 : FontWeight.w500,
+                      color: step.done ? null : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (step.event != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '${DateFormat('EEE, d MMM · h:mm a').format(step.event!.at.toLocal())} · ${step.event!.by}',
+                      style: t.bodySmall,
+                    ),
+                  ] else
+                    Text('Not yet', style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant.withValues(alpha: 0.7))),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -17,6 +17,20 @@ class _OrdersScreenState extends State<OrdersScreen> {
   OrderStatus? _filter;
 
   @override
+  void initState() {
+    super.initState();
+    // Opening the list is "an admin has looked at these" — record it, but
+    // only for orders still sitting untouched, and only once per order.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = context.read<AppStore>();
+      for (final o in List<Order>.of(store.orders)) {
+        if (o.status == OrderStatus.pending) store.markOrderViewed(o);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     var orders = store.orders;
@@ -159,18 +173,26 @@ class _OrderCard extends StatelessWidget {
   List<Widget> _actions(BuildContext context) {
     switch (order.status) {
       case OrderStatus.pending:
+      case OrderStatus.viewed:
         return [
           TextButton(
-            onPressed: () => store.updateOrderStatus(order, OrderStatus.cancelled),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.danger)),
+            onPressed: () => store.updateOrderStatus(order, OrderStatus.rejected),
+            child: const Text('Reject', style: TextStyle(color: AppColors.danger)),
           ),
           const SizedBox(width: 4),
           FilledButton.tonal(
-            onPressed: () => store.updateOrderStatus(order, OrderStatus.confirmed),
-            child: const Text('Confirm'),
+            onPressed: () => store.updateOrderStatus(order, OrderStatus.accepted),
+            child: const Text('Accept'),
           ),
         ];
-      case OrderStatus.confirmed:
+      case OrderStatus.accepted:
+        return [
+          FilledButton.tonal(
+            onPressed: () => store.updateOrderStatus(order, OrderStatus.processing),
+            child: const Text('Start processing'),
+          ),
+        ];
+      case OrderStatus.processing:
         return [
           FilledButton(
             onPressed: () => store.updateOrderStatus(order, OrderStatus.fulfilled),
@@ -187,6 +209,7 @@ class _OrderCard extends StatelessWidget {
             ],
           ),
         ];
+      case OrderStatus.rejected:
       case OrderStatus.cancelled:
         return [
           TextButton(

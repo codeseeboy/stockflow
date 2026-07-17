@@ -381,14 +381,41 @@ String relTime(DateTime time) {
 
 String orderStatusLabel(OrderStatus s) => switch (s) {
       OrderStatus.pending => 'Pending',
-      OrderStatus.confirmed => 'Confirmed',
+      OrderStatus.viewed => 'Viewed',
+      OrderStatus.accepted => 'Accepted',
+      OrderStatus.rejected => 'Rejected',
+      OrderStatus.processing => 'Processing',
       OrderStatus.fulfilled => 'Fulfilled',
       OrderStatus.cancelled => 'Cancelled',
     };
 
 Color orderStatusColor(OrderStatus s) => switch (s) {
       OrderStatus.pending => AppColors.warning,
-      OrderStatus.confirmed => AppColors.cDairy,
+      OrderStatus.viewed => AppColors.cDairy,
+      OrderStatus.accepted => AppColors.cEssentials,
+      OrderStatus.rejected => AppColors.danger,
+      OrderStatus.processing => AppColors.accent,
       OrderStatus.fulfilled => AppColors.success,
       OrderStatus.cancelled => AppColors.danger,
     };
+
+IconData orderStatusIcon(OrderStatus s) => switch (s) {
+      OrderStatus.pending => Icons.hourglass_top_rounded,
+      OrderStatus.viewed => Icons.visibility_outlined,
+      OrderStatus.accepted => Icons.thumb_up_outlined,
+      OrderStatus.rejected => Icons.cancel_outlined,
+      OrderStatus.processing => Icons.autorenew_rounded,
+      OrderStatus.fulfilled => Icons.check_circle_rounded,
+      OrderStatus.cancelled => Icons.block_rounded,
+    };
+
+/// The order lifecycle in the sequence it's meant to move through — used to
+/// draw a timeline and to know what "still ahead" means for a given status.
+/// (Rejected/cancelled are terminal branches, not part of the main sequence.)
+const kOrderStatusSequence = [
+  OrderStatus.pending,
+  OrderStatus.viewed,
+  OrderStatus.accepted,
+  OrderStatus.processing,
+  OrderStatus.fulfilled,
+];

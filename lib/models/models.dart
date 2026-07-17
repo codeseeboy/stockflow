@@ -11,7 +11,31 @@ enum UserRole { admin, worker, customer }
 
 enum StockStatus { inStock, low, out }
 
-enum OrderStatus { pending, confirmed, fulfilled, cancelled }
+/// The order's lifecycle. `pending` is where every demand starts (created and
+/// submitted by the customer in the same action); everything after that is an
+/// admin action, tracked with who and when in [OrderStatusEvent].
+enum OrderStatus { pending, viewed, accepted, rejected, processing, fulfilled, cancelled }
+
+/// One step in an order's timeline: what it became, when, and who did it —
+/// so a customer can always see where their demand stands without asking.
+class OrderStatusEvent {
+  final OrderStatus status;
+  final DateTime at;
+  final String by;
+  const OrderStatusEvent({required this.status, required this.at, required this.by});
+
+  Map<String, dynamic> toJson() => {
+        'status': status.name,
+        'at': at.toIso8601String(),
+        'by': by,
+      };
+
+  factory OrderStatusEvent.fromJson(Map<String, dynamic> j) => OrderStatusEvent(
+        status: OrderStatus.values.byName((j['status'] as String?) ?? 'pending'),
+        at: DateTime.tryParse(j['at']?.toString() ?? '') ?? DateTime.now(),
+        by: (j['by'] as String?) ?? '',
+      );
+}
 
 enum CycleStatus { draft, open, closed }
 
@@ -342,6 +366,10 @@ class Order {
   /// Server-assigned running number → the human-readable `SF-101` code.
   final int? orderNo;
 
+  /// Every status this order has passed through, with who and when. Always
+  /// has at least the "submitted" event — see [timeline].
+  final List<OrderStatusEvent> history;
+
   Order({
     required this.id,
     required this.cycleId,
@@ -351,6 +379,7 @@ class Order {
     required this.status,
     required this.createdAt,
     this.orderNo,
+    this.history = const [],
   });
 
   int get itemCount => lines.length;
@@ -364,6 +393,13 @@ class Order {
     return 'SF-${tail.substring(0, tail.length < 4 ? tail.length : 4).toUpperCase()}';
   }
 
+  /// The full timeline, guaranteed to start with the submission event even
+  /// for orders synced before status history existed.
+  List<OrderStatusEvent> get timeline {
+    if (history.isNotEmpty) return history;
+    return [OrderStatusEvent(status: OrderStatus.pending, at: createdAt, by: customerName)];
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'cycleId': cycleId,
@@ -373,6 +409,7 @@ class Order {
         'status': status.name,
         'createdAt': createdAt.toIso8601String(),
         if (orderNo != null) 'orderNo': orderNo,
+        'history': history.map((h) => h.toJson()).toList(),
       };
 
   factory Order.fromJson(Map<String, dynamic> j) => Order(
@@ -386,6 +423,9 @@ class Order {
         status: OrderStatus.values.byName((j['status'] as String?) ?? 'pending'),
         createdAt: DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
         orderNo: (j['orderNo'] as num?)?.toInt(),
+        history: ((j['history'] as List?) ?? const [])
+            .map((e) => OrderStatusEvent.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList(),
       );
 }
 

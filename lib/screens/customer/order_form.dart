@@ -192,7 +192,14 @@ class _OrderFormState extends State<OrderForm> {
 
     // Single window already used → full-screen "closed for you" state.
     if (windows.length == 1 && alreadyOrdered) {
-      return _AlreadyOrderedState(cycle: cycle, onOpenBalance: widget.onOpenBalance);
+      final myOrder = customerOrdersFor(store, widget.name, widget.phone).firstWhere((o) => o.cycleId == cycle.id);
+      return _AlreadyOrderedState(
+        store: store,
+        cycle: cycle,
+        order: myOrder,
+        designation: widget.designation,
+        onOpenBalance: widget.onOpenBalance,
+      );
     }
 
     final matches = onDemand.where((i) {
@@ -214,6 +221,10 @@ class _OrderFormState extends State<OrderForm> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text('Place Demand', style: Theme.of(context).textTheme.headlineSmall),
+                    const SizedBox(height: 2),
+                    Text('This week\'s demand only — placed once, closed until the next window', style: Theme.of(context).textTheme.bodyMedium),
+                    const SizedBox(height: 14),
                     if (windows.length > 1) ...[
                       _WindowSelector(
                         windows: windows,
@@ -453,43 +464,145 @@ class _EmptyDemandState extends StatelessWidget {
   }
 }
 
-/// Shown after a customer has placed their demand for the open cycle. Kept
-/// clean — the full balance breakdown lives on the Balance tab, one tap away.
+/// Shown after a customer has placed their demand for the open cycle — a full
+/// professional confirmation, not just a checkmark: exactly what was
+/// submitted, when, its status, what's left of the balance, and that the
+/// customer must wait for the next window (marked TBD since nothing is
+/// pre-scheduled — the unit opens the next one when ready).
 class _AlreadyOrderedState extends StatelessWidget {
+  final AppStore store;
   final OrderCycle cycle;
+  final Order order;
+  final String designation;
   final VoidCallback? onOpenBalance;
-  const _AlreadyOrderedState({required this.cycle, this.onOpenBalance});
+  const _AlreadyOrderedState({
+    required this.store,
+    required this.cycle,
+    required this.order,
+    required this.designation,
+    this.onOpenBalance,
+  });
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 76,
-            height: 76,
-            decoration: BoxDecoration(color: AppColors.successWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
-            child: const Icon(Icons.verified_rounded, size: 38, color: AppColors.success),
+    final scheme = Theme.of(context).colorScheme;
+    final week = calendarWeekOf(order.createdAt.toLocal());
+    final weekRange = week.start.month == week.end.month
+        ? 'Mon ${DateFormat('d').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}'
+        : 'Mon ${DateFormat('d MMM').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}';
+    final balances = store.balancesFor(name: order.customerName, phone: order.customerPhone, zone: designation, month: cycle.month).where((b) => b.total > 0).toList();
+    final remaining = balances.fold<double>(0, (s, b) => s + b.remaining);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              Center(
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(color: AppColors.successWash, borderRadius: BorderRadius.circular(AppRadius.xl)),
+                  child: const Icon(Icons.verified_rounded, size: 36, color: AppColors.success),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('This week\'s demand is already submitted', style: t.titleLarge, textAlign: TextAlign.center),
+              const SizedBox(height: 4),
+              Text('Wait for the next demand window to place another.', textAlign: TextAlign.center, style: t.bodyMedium),
+              const SizedBox(height: 20),
+
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _row(context, 'Current month', cycle.month.label),
+                    _row(context, 'Current week', 'Week ${week.number} · $weekRange'),
+                    const Divider(height: 22),
+                    _row(context, 'Submitted', DateFormat('EEE, d MMM yyyy').format(order.createdAt.toLocal())),
+                    _row(context, 'Time', DateFormat('h:mm a').format(order.createdAt.toLocal())),
+                    _row(context, 'Order', order.displayId),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(child: Text('Status', style: t.bodyMedium)),
+                        Pill(orderStatusLabel(order.status), color: orderStatusColor(order.status), icon: orderStatusIcon(order.status)),
+                      ],
+                    ),
+                    const Divider(height: 22),
+                    Text('Quantities submitted', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      for (final l in order.lines)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(AppRadius.pill)),
+                          child: Text('${l.emoji} ${l.name} · ${fmtQty(l.qty, l.unit)}', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                        ),
+                    ]),
+                    const Divider(height: 22),
+                    Row(
+                      children: [
+                        Expanded(child: Text('Remaining monthly balance', style: t.bodyMedium)),
+                        Text(fmtNum(remaining), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: AppColors.brandDark)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                ),
+                child: Row(children: [
+                  Icon(Icons.hourglass_bottom_rounded, size: 18, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Next demand window: TBD', style: t.titleSmall),
+                        Text('You\'ll be notified the moment the unit opens it.', style: t.bodySmall),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+
+              if (onOpenBalance != null) ...[
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: onOpenBalance,
+                  icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+                  label: Text('View my ${cycle.month.shortLabel} balance'),
+                ),
+              ],
+              const SizedBox(height: 12),
+            ],
           ),
-          const SizedBox(height: 18),
-          Text('Demand placed', style: t.titleLarge, textAlign: TextAlign.center),
-          const SizedBox(height: 6),
-          Text(
-            '${cycle.title} is done for you. It reopens with the next demand.',
-            textAlign: TextAlign.center,
-            style: t.bodyMedium,
-          ),
-          if (onOpenBalance != null) ...[
-            const SizedBox(height: 22),
-            FilledButton.icon(
-              onPressed: onOpenBalance,
-              icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
-              label: Text('View my ${cycle.month.shortLabel} balance'),
-            ),
-          ],
-        ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, String label, String value) {
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: t.bodyMedium)),
+          Text(value, style: t.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+        ],
       ),
     );
   }

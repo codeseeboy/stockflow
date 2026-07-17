@@ -7,20 +7,49 @@ exercise the new features and demonstrate two zones behaving differently.
 
 ---
 
-## STEP 0 (required once) — wipe old data + apply the migration
+## STEP 0 (required once) — full reset before real testing
 
-The phone app talks to your **live** Supabase. Run both scripts in
-Supabase → **SQL Editor → New query**:
+The phone app talks to your **live** Supabase. Run both scripts, in this
+order, in Supabase → **SQL Editor → New query**:
 
-1. **`WIPE_DATA.sql`** — deletes all old items, orders, demands and customer
-   accounts so you start fresh. Admin/staff logins are kept. *(Cannot be undone.)*
-2. **`MIGRATION.sql`** — adds the new demand/zone columns **and the short
-   order-number column (SF-101 codes)**. Without it, raising a demand or
-   assigning a zone won't save. Safe to run more than once — if you ran an
-   older copy, run it again to pick up `order_no`.
+1. **`WIPE_DATA.sql`** — deletes every item, demand, order (and its status
+   timeline), stock movement, broadcast and customer account so the app
+   starts exactly like a fresh install. Admin/staff logins are kept.
+   *(Cannot be undone.)*
+2. **`MIGRATION.sql`** — adds every column the app now expects: the demand/
+   zone fields, the short order-number column (SF-101 codes), and the new
+   `status_history` timeline + the fuller `order_status` set (viewed,
+   accepted, rejected, processing). **Run this even if you ran an older copy
+   before** — it's additive and safe to run repeatedly.
 
 After the wipe the app starts empty — upload your stock Excel again from the
 admin console (Import master stock) to load the item catalogue.
+
+For the **phone itself** to be truly fresh (no cached orders, no saved
+profile), use `scripts/install-phone.bat` — it always installs clean.
+
+---
+
+## What's new to look at (v1.5.0)
+
+- **Home** — a real calendar: the month, the current week with its exact
+  Monday–Sunday dates, a live countdown to the demand window's close, and a
+  full month timeline showing every week as completed / active / upcoming.
+- **Balance** — filter by This week / Previous week / This month / Previous
+  months / All history. Nine summary figures, a weekly trend chart, and every
+  category broken down to the week level (max allowed, requested, still
+  available) — tap a category for the full "how this number came" math.
+- **Place Demand** (was "Order") — only ever the active week's demand. Submit
+  once and it becomes a full confirmation screen: month, week, exact
+  submission time, what was submitted, remaining balance, and "next window:
+  TBD" until the unit opens one.
+- **My Order History** (was "Orders") — every demand grouped by month, each
+  showing its week, submission time, and the balance left right after it, plus
+  a full timeline: Submitted → Viewed by admin → Accepted → Processing →
+  Fulfilled (or Rejected), each step stamped with who and when.
+- **Admin → Orders** — Accept / Reject / Start processing / Mark fulfilled
+  buttons now drive that same timeline; opening the list marks pending orders
+  as viewed automatically.
 
 ---
 

@@ -22,3 +22,15 @@ alter table profiles add column if not exists zone text not null default '';
 -- Short human-readable order numbers (shown as SF-101). bigserial backfills
 -- every existing row automatically.
 alter table orders add column if not exists order_no bigserial;
+
+-- Full order timeline: every status change, who made it, and when — powers
+-- the "created / viewed / accepted / processing / fulfilled" tracker.
+alter table orders add column if not exists status_history jsonb not null default '[]'::jsonb;
+
+-- The order_status enum needs the fuller lifecycle too (bare statements —
+-- ALTER TYPE ADD VALUE can't run inside a DO block; IF NOT EXISTS makes each
+-- safe to re-run).
+alter type order_status add value if not exists 'viewed';
+alter type order_status add value if not exists 'accepted';
+alter type order_status add value if not exists 'rejected';
+alter type order_status add value if not exists 'processing';

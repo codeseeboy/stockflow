@@ -148,6 +148,19 @@ CalendarWeek calendarWeekOf(DateTime date) {
   return CalendarWeek(weeksSince + 1, start, end);
 }
 
+/// Every calendar week that touches [month], in order — 4 or 5 of them
+/// depending on how the days fall (February included), never assumed fixed.
+List<CalendarWeek> weeksOfMonth(RationMonth month) {
+  final weeks = <CalendarWeek>[];
+  var d = month.firstDay;
+  while (!d.isAfter(month.lastDay)) {
+    final w = calendarWeekOf(d);
+    weeks.add(w);
+    d = w.end.add(const Duration(days: 1));
+  }
+  return weeks;
+}
+
 /// One category's entitlement position for a customer in a month. This — not
 /// warehouse stock — is what the customer sees and what caps their order.
 class CategoryBalance {

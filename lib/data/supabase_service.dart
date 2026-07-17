@@ -248,8 +248,11 @@ class SupabaseService {
   Future<void> updateUserZone(String id, String zone) =>
       client.from('profiles').update({'zone': zone}).eq('id', id);
 
-  Future<void> updateOrderStatus(String id, OrderStatus status) =>
-      client.from('orders').update({'status': status.name}).eq('id', id);
+  Future<void> updateOrderStatus(String id, OrderStatus status, {List<OrderStatusEvent>? history}) =>
+      client.from('orders').update({
+        'status': status.name,
+        if (history != null) 'status_history': history.map((h) => h.toJson()).toList(),
+      }).eq('id', id);
 
   Future<void> updateCycleStatus(String id, CycleStatus status) =>
       client.from('order_cycles').update({'status': status.name}).eq('id', id);
@@ -389,15 +392,25 @@ class SupabaseService {
         qty: _d(oi['qty_requested']),
       );
     }).toList();
+    // Status values from before the richer lifecycle existed ('confirmed')
+    // fall back to something in the current enum rather than throwing.
+    final rawStatus = (r['status'] as String?) ?? 'pending';
+    final status = OrderStatus.values.where((s) => s.name == rawStatus).firstOrNull ??
+        (rawStatus == 'confirmed' ? OrderStatus.accepted : OrderStatus.pending);
+    final rawHistory = (r['status_history'] as List?) ?? const [];
+    final history = rawHistory
+        .map((e) => OrderStatusEvent.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
     return Order(
       id: r['id'].toString(),
       cycleId: r['cycle_id']?.toString() ?? '',
       customerName: (r['customer_name'] as String?) ?? 'Customer',
       customerPhone: (r['customer_phone'] as String?) ?? '',
       lines: lines,
-      status: OrderStatus.values.byName((r['status'] as String?) ?? 'pending'),
+      status: status,
       createdAt: DateTime.tryParse(r['created_at']?.toString() ?? '') ?? DateTime.now(),
       orderNo: (r['order_no'] as num?)?.toInt(),
+      history: history,
     );
   }
 

@@ -190,7 +190,10 @@ Future<Uint8List> buildOrdersReport(AppStore store) {
               o.lines.map((l) => '${l.name} (${_n(l.qty)} ${l.unit})').join(', '),
               switch (o.status) {
                 OrderStatus.pending => 'Pending',
-                OrderStatus.confirmed => 'Confirmed',
+                OrderStatus.viewed => 'Viewed',
+                OrderStatus.accepted => 'Accepted',
+                OrderStatus.rejected => 'Rejected',
+                OrderStatus.processing => 'Processing',
                 OrderStatus.fulfilled => 'Fulfilled',
                 OrderStatus.cancelled => 'Cancelled',
               },

@@ -226,7 +226,7 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         onOpenBalance: () => setState(() => _index = 2),
       ),
       BalanceScreen(name: widget.name, phone: widget.phone, designation: widget.designation),
-      _MyOrdersTab(name: widget.name, phone: widget.phone, onOrderNow: () => setState(() => _index = 1)),
+      _MyOrdersTab(name: widget.name, phone: widget.phone, designation: widget.designation, onOrderNow: () => setState(() => _index = 1)),
       _ProfileTab(name: widget.name, phone: widget.phone, email: widget.email, address: widget.address),
     ];
 
@@ -250,9 +250,9 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.add_shopping_cart_outlined), selectedIcon: Icon(Icons.add_shopping_cart_rounded), label: 'Order'),
+          NavigationDestination(icon: Icon(Icons.add_shopping_cart_outlined), selectedIcon: Icon(Icons.add_shopping_cart_rounded), label: 'Demand'),
           NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), selectedIcon: Icon(Icons.account_balance_wallet_rounded), label: 'Balance'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long_rounded), label: 'Orders'),
+          NavigationDestination(icon: Icon(Icons.history_rounded), selectedIcon: Icon(Icons.history_rounded), label: 'History'),
           NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded), label: 'Profile'),
         ],
       ),
@@ -502,6 +502,10 @@ class _HomeTab extends StatelessWidget {
               _HomeGreeting(name: displayName),
               const SizedBox(height: 18),
               _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
+              const SizedBox(height: 22),
+              const _SectionLabel('THIS MONTH AT A GLANCE'),
+              const SizedBox(height: 8),
+              _MonthTimelineCard(store: store, designation: designation),
               const SizedBox(height: 22),
               const _SectionLabel('YOUR BALANCE'),
               const SizedBox(height: 8),
@@ -818,6 +822,105 @@ class _OrderStatusCard extends StatelessWidget {
   }
 }
 
+/// Every calendar week of the current month in one glance: which ones are
+/// done, which one is active right now, and which haven't arrived yet — so
+/// the user always knows where they stand in the monthly demand cycle
+/// without doing the arithmetic themselves. A month has 4 or 5 weeks
+/// depending on how the days fall (weeksOfMonth computes this for real,
+/// nothing here assumes a fixed count).
+class _MonthTimelineCard extends StatelessWidget {
+  final AppStore store;
+  final String designation;
+  const _MonthTimelineCard({required this.store, required this.designation});
+
+  @override
+  Widget build(BuildContext context) {
+    final month = store.currentMonth;
+    final weeks = weeksOfMonth(month);
+    final today = DateTime.now();
+    final cycles = store.cycles.where((c) => c.isPublic || c.designation.toLowerCase() == designation.trim().toLowerCase()).toList();
+
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Column(
+        children: [
+          for (var i = 0; i < weeks.length; i++) ...[
+            if (i > 0) Divider(height: 1, color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.6)),
+            _WeekRow(
+              week: weeks[i],
+              today: today,
+              // A demand overlapping this calendar week, if the unit opened one.
+              cycle: cycles.where((c) => !c.weekEnd.isBefore(weeks[i].start) && !c.weekStart.isAfter(weeks[i].end)).firstOrNull,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _WeekRow extends StatelessWidget {
+  final CalendarWeek week;
+  final DateTime today;
+  final OrderCycle? cycle;
+  const _WeekRow({required this.week, required this.today, this.cycle});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final d = DateTime(today.year, today.month, today.day);
+    final completed = week.end.isBefore(d);
+    final active = !completed && !week.start.isAfter(d);
+    final range = week.start.month == week.end.month
+        ? 'Mon ${DateFormat('d').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}'
+        : 'Mon ${DateFormat('d MMM').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}';
+
+    final Color dotColor;
+    final IconData icon;
+    final String state;
+    if (completed) {
+      dotColor = scheme.onSurfaceVariant;
+      icon = Icons.check_circle_rounded;
+      state = 'Completed';
+    } else if (active) {
+      dotColor = AppColors.success;
+      icon = Icons.radio_button_checked_rounded;
+      state = 'Active';
+    } else {
+      dotColor = scheme.outline;
+      icon = Icons.lock_outline_rounded;
+      state = 'Upcoming';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: dotColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Week ${week.number}', style: t.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: active ? scheme.onSurface : scheme.onSurfaceVariant)),
+                Text(range, style: t.bodySmall),
+              ],
+            ),
+          ),
+          if (cycle != null)
+            Pill(
+              cycle!.status == CycleStatus.open ? 'Demand open' : 'Demand closed',
+              color: cycle!.status == CycleStatus.open ? AppColors.success : scheme.onSurfaceVariant,
+            )
+          else
+            Text(state, style: t.bodySmall?.copyWith(color: dotColor, fontWeight: active ? FontWeight.w700 : FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+
 class _LastOrderStrip extends StatelessWidget {
   final Order order;
   const _LastOrderStrip({required this.order});
@@ -864,11 +967,16 @@ class _LastOrderStrip extends StatelessWidget {
 
 // ---------------- My Orders ----------------
 
+/// The complete tracking record of every demand ever placed — not just a
+/// list. Every card carries its month, week and exact submission time, and
+/// tapping one opens the full created→viewed→accepted→processing→fulfilled
+/// timeline so the customer never has to ask the admin where things stand.
 class _MyOrdersTab extends StatelessWidget {
   final String name;
   final String phone;
+  final String designation;
   final VoidCallback onOrderNow;
-  const _MyOrdersTab({required this.name, required this.phone, required this.onOrderNow});
+  const _MyOrdersTab({required this.name, required this.phone, required this.designation, required this.onOrderNow});
 
   @override
   Widget build(BuildContext context) {
@@ -876,18 +984,13 @@ class _MyOrdersTab extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final orders = customerOrdersFor(store, name, phone);
 
-    // Group orders by their cycle (week), newest week first.
-    final byCycle = <String, List<Order>>{};
+    // Newest first, grouped by month.
+    final byMonth = <String, List<Order>>{};
     for (final o in orders) {
-      byCycle.putIfAbsent(o.cycleId, () => []).add(o);
+      byMonth.putIfAbsent(store.monthOfOrder(o).key, () => []).add(o);
     }
-    final cycleOrder = store.cyclesByRecent.map((c) => c.id).toList();
-    final groupedIds = byCycle.keys.toList()
-      ..sort((a, b) {
-        final ia = cycleOrder.indexOf(a);
-        final ib = cycleOrder.indexOf(b);
-        return (ia == -1 ? 9999 : ia).compareTo(ib == -1 ? 9999 : ib);
-      });
+    final monthKeys = byMonth.keys.toList()
+      ..sort((a, b) => (RationMonth.tryParse(b) ?? store.currentMonth).compareTo(RationMonth.tryParse(a) ?? store.currentMonth));
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -897,26 +1000,30 @@ class _MyOrdersTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('My Orders', style: t.headlineSmall),
+              Text('My Order History', style: t.headlineSmall),
               const SizedBox(height: 4),
-              Text('Grouped by demand, newest first', style: t.bodyMedium),
+              Text('Every demand you\'ve placed, with full status tracking', style: t.bodyMedium),
               const SizedBox(height: 16),
               if (orders.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 36),
                   child: Column(children: [
-                    const EmptyState(icon: Icons.receipt_long_rounded, title: 'No orders yet', subtitle: 'Place your first order to see it here.'),
+                    const EmptyState(icon: Icons.history_rounded, title: 'No demands yet', subtitle: 'Place your first demand to see it tracked here.'),
                     const SizedBox(height: 12),
                     if (store.canPlaceOrders)
-                      FilledButton.icon(onPressed: onOrderNow, icon: const Icon(Icons.add_shopping_cart_rounded, size: 18), label: const Text('Start an order')),
+                      FilledButton.icon(onPressed: onOrderNow, icon: const Icon(Icons.add_shopping_cart_rounded, size: 18), label: const Text('Place a demand')),
                   ]),
                 )
               else
-                ...groupedIds.map((cid) => _WeekGroup(
-                      store: store,
-                      cycleId: cid,
-                      orders: byCycle[cid]!..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
-                    )),
+                for (final mk in monthKeys) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10, top: 4),
+                    child: Text((RationMonth.tryParse(mk) ?? store.currentMonth).label, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                  ),
+                  for (final o in byMonth[mk]!..sort((a, b) => b.createdAt.compareTo(a.createdAt)))
+                    _OrderHistoryCard(store: store, order: o, designation: designation, allOrders: orders),
+                  const SizedBox(height: 8),
+                ],
               const BrandFooter(),
               const SizedBox(height: 8),
             ],
@@ -927,84 +1034,102 @@ class _MyOrdersTab extends StatelessWidget {
   }
 }
 
-/// One week's worth of orders with a header showing the week + live/closed state.
-class _WeekGroup extends StatelessWidget {
+/// One demand: month, week, exact date range, submission time, what was
+/// ordered, current status, and what was left of the balance right after it.
+class _OrderHistoryCard extends StatelessWidget {
   final AppStore store;
-  final String cycleId;
-  final List<Order> orders;
-  const _WeekGroup({required this.store, required this.cycleId, required this.orders});
+  final Order order;
+  final String designation;
+  final List<Order> allOrders;
+  const _OrderHistoryCard({required this.store, required this.order, required this.designation, required this.allOrders});
+
+  /// Point-in-time remaining balance, per category this order touched,
+  /// counting only demands placed up to and including this one.
+  Map<String, double> _balanceAfter() {
+    final month = store.monthOfOrder(order);
+    final zone = store.zoneFor(designation);
+    final carried = store.carriedInto(order.customerName, order.customerPhone, designation, month);
+    final categories = <String>{};
+    for (final l in order.lines) {
+      final c = store.categoryOfLine(l);
+      if (c != null) categories.add(c);
+    }
+    final out = <String, double>{};
+    for (final cat in categories) {
+      var consumedUpTo = 0.0;
+      for (final o in allOrders) {
+        if (o.status == OrderStatus.cancelled || o.status == OrderStatus.rejected) continue;
+        if (store.monthOfOrder(o) != month) continue;
+        if (o.createdAt.isAfter(order.createdAt)) continue;
+        for (final l in o.lines) {
+          if (store.categoryOfLine(l) == cat) consumedUpTo += l.qty;
+        }
+      }
+      final left = zone.monthlyAllowance(cat, month) + (carried[cat] ?? 0) - consumedUpTo;
+      out[cat] = left < 0 ? 0 : left;
+    }
+    return out;
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final cycle = store.cycles.where((c) => c.id == cycleId).firstOrNull;
-    final title = cycle?.title ?? 'Earlier orders';
-    final open = cycle?.status == CycleStatus.open;
-    final range = cycle != null
-        ? '${DateFormat('d MMM').format(cycle.weekStart)} – ${DateFormat('d MMM').format(cycle.weekEnd)}'
-        : null;
+    final month = store.monthOfOrder(order);
+    final week = calendarWeekOf(order.createdAt.toLocal());
+    final weekRange = week.start.month == week.end.month
+        ? 'Mon ${DateFormat('d').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}'
+        : 'Mon ${DateFormat('d MMM').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}';
+    final balanceAfter = _balanceAfter();
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Week header
-          Row(
-            children: [
-              Icon(Icons.calendar_month_rounded, size: 18, color: scheme.primary),
-              const SizedBox(width: 8),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AppCard(
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderDetailScreen(order: order))),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(orderStatusIcon(order.status), size: 20, color: orderStatusColor(order.status)),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    if (range != null) Text(range, style: t.bodySmall),
+                    Text(order.displayId, style: t.titleSmall),
+                    Text('${month.shortLabel} · Week ${week.number} · $weekRange', style: t.bodySmall),
                   ],
                 ),
               ),
-              Pill(open ? 'Live' : 'Closed', color: open ? AppColors.success : scheme.onSurfaceVariant),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ...orders.map((o) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: AppCard(
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => OrderDetailScreen(order: o)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(o.displayId, style: t.titleSmall),
-                              const SizedBox(height: 2),
-                              Text(DateFormat('EEE, d MMM · h:mm a').format(o.createdAt.toLocal()),
-                                  style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                            ],
-                          ),
-                        ),
-                        Pill(orderStatusLabel(o.status), color: orderStatusColor(o.status)),
-                      ]),
-                      const SizedBox(height: 10),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        for (final l in o.lines)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(AppRadius.pill)),
-                            child: Text('${l.emoji} ${l.name} · ${fmtQty(l.qty, l.unit)}', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                          ),
-                      ]),
-                    ],
-                  ),
+              Pill(orderStatusLabel(order.status), color: orderStatusColor(order.status)),
+            ]),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 30),
+              child: Text('Submitted ${DateFormat('EEE, d MMM · h:mm a').format(order.createdAt.toLocal())}', style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+            ),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final l in order.lines)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(AppRadius.pill)),
+                  child: Text('${l.emoji} ${l.name} · ${fmtQty(l.qty, l.unit)}', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
                 ),
-              )),
-        ],
+            ]),
+            if (balanceAfter.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Text('Balance left after this demand', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 8, runSpacing: 6, children: [
+                for (final e in balanceAfter.entries)
+                  Pill('${e.key}: ${fmtNum(e.value)}', color: AppColors.brand),
+              ]),
+            ],
+          ],
+        ),
       ),
     );
   }
