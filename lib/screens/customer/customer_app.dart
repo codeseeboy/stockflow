@@ -85,17 +85,14 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted) store.reload();
       });
-      // Auto-start only right after a brand-new signup (never on a returning
-      // login) and only the first time ever on this device. The earlier
-      // freeze traced back to signup leaving the profile's zone unset on the
-      // server, which made the very next sync think it had changed and
-      // rebuild this whole shell mid-tour — now fixed at the source in
-      // signUpCustomer, so the tour no longer races a surprise rebuild.
-      if (widget.isNewUser && !TourPrefs.seen) {
-        Future<void>.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) _tour.start(buildAppTour());
-        });
-      }
+      // Guided tour paused for now — nothing should trigger it while it's
+      // switched off. Re-enable by restoring this block (the freeze it used
+      // to race against is already fixed at the source in signUpCustomer).
+      // if (widget.isNewUser && !TourPrefs.seen) {
+      //   Future<void>.delayed(const Duration(milliseconds: 500), () {
+      //     if (mounted) _tour.start(buildAppTour());
+      //   });
+      // }
     });
   }
 
@@ -1372,15 +1369,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: widget.onReplayTour,
-                  icon: const Icon(Icons.explore_outlined, size: 18),
-                  label: const Text('Replay app tour'),
-                ),
-              ),
+              // Guided tour paused for now — nothing here can trigger it.
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
