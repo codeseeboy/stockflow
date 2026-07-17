@@ -21,6 +21,15 @@ class ImportRow {
     required this.qty,
     required this.reorder,
   });
+
+  ImportRow copyWith({String? name, String? emoji, String? category, String? unit, double? qty, double? reorder}) => ImportRow(
+        name: name ?? this.name,
+        emoji: emoji ?? this.emoji,
+        category: category ?? this.category,
+        unit: unit ?? this.unit,
+        qty: qty ?? this.qty,
+        reorder: reorder ?? this.reorder,
+      );
 }
 
 class ImportResult {
@@ -105,8 +114,10 @@ bool _looksLikeSerial(List<List<String>> table, int headerIndex, int col, List<S
 
 ImportResult _parseTable(List<List<String>> table) {
   final warnings = <String>[];
-  // Find the first non-empty row as the header.
-  final headerIndex = table.indexWhere((r) => r.any((c) => c.trim().isNotEmpty));
+  // The real header row — not necessarily the first non-empty one; a merged
+  // title row above it ("Monthly Stock Sheet — July") only has one non-blank
+  // cell once decoded and would otherwise get mistaken for the header.
+  final headerIndex = _findHeaderRow(table);
   if (headerIndex < 0) {
     return const ImportResult([], ['The file looks empty.']);
   }
@@ -176,22 +187,30 @@ ImportResult _parseTable(List<List<String>> table) {
     }
   }
 
+  final categoryCol = col(['category', 'cat', 'type', 'group']);
   final ci = {
     'name': nameCol,
-    'category': col(['category', 'cat', 'type', 'group']),
+    'category': categoryCol,
     'unit': col(['unit', 'uom', 'a/u']),
     'qty': qtyCol,
     'reorder': col(['reorder', 'min', 'threshold']),
     'emoji': col(['emoji', 'icon']),
   };
 
+  // Real stock sheets often merge the category cell down a block of items
+  // (stated once, blank for every row after) — carry it down so those rows
+  // keep their category instead of falling back to "Essentials". Never
+  // applied to qty/reorder: a genuinely missing number must stay flagged,
+  // not silently inherit the row above it.
+  final filledTable = categoryCol == null ? table : _forwardFillColumn(table, headerIndex, categoryCol);
+
   String at(List<String> row, int? idx) =>
       (idx != null && idx >= 0 && idx < row.length) ? row[idx].trim() : '';
 
   final rows = <ImportRow>[];
   var skippedNumericNames = 0;
-  for (var i = headerIndex + 1; i < table.length; i++) {
-    final row = table[i];
+  for (var i = headerIndex + 1; i < filledTable.length; i++) {
+    final row = filledTable[i];
     final name = ci['name'] != null ? at(row, ci['name']) : (row.isNotEmpty ? row.first.trim() : '');
     if (name.isEmpty) continue;
     // A bare number is never an item name — that's a serial or a stray total.
@@ -220,6 +239,46 @@ double _num(String s) {
   if (s.isEmpty) return 0;
   final cleaned = s.replaceAll(RegExp(r'[^0-9.\-]'), '');
   return double.tryParse(cleaned) ?? 0;
+}
+
+/// Finds the real column-header row among the first few rows of the sheet —
+/// the one with the most distinct non-blank cells, not just the first
+/// non-blank row (which is often a merged title spanning a single cell).
+int _findHeaderRow(List<List<String>> table) {
+  final limit = table.length < 10 ? table.length : 10;
+  var best = -1;
+  var bestCount = 0;
+  for (var i = 0; i < limit; i++) {
+    final count = table[i].where((c) => c.trim().isNotEmpty).length;
+    if (count == 0) continue;
+    if (best == -1) best = i;
+    if (count > bestCount) {
+      bestCount = count;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/// Carries the last non-blank value in [col] down through blank cells — the
+/// pattern a merged Excel cell produces once decoded (set on the first row
+/// of a block, blank on every row after).
+List<List<String>> _forwardFillColumn(List<List<String>> table, int headerIndex, int col) {
+  final out = <List<String>>[for (final r in table) List<String>.of(r)];
+  var last = '';
+  for (var i = headerIndex + 1; i < out.length; i++) {
+    final row = out[i];
+    final v = col < row.length ? row[col].trim() : '';
+    if (v.isNotEmpty) {
+      last = v;
+    } else if (last.isNotEmpty) {
+      while (row.length <= col) {
+        row.add('');
+      }
+      row[col] = last;
+    }
+  }
+  return out;
 }
 
 String _unit(String s) {

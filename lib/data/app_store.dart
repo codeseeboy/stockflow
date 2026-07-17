@@ -61,14 +61,15 @@ class AppStore extends ChangeNotifier {
 
   /// Create a new designation/zone, optionally starting from an existing scale.
   /// Returns false when the name is blank or already taken.
-  bool addZone(String name, {String? copyFrom}) {
+  bool addZone(String name, {String? copyFrom, String description = ''}) {
     final n = name.trim();
     if (n.isEmpty) return false;
     if (_zones.keys.any((k) => k.toLowerCase() == n.toLowerCase())) return false;
-    final base = copyFrom != null ? zoneFor(copyFrom) : kOfficersZone;
+    final base = copyFrom != null ? zoneFor(copyFrom) : const RationZone(name: '', level: '');
     _zones[n] = RationZone(
       name: n,
       level: n,
+      description: description.trim(),
       perDay: Map<String, double>.of(base.perDay),
       itemMax: Map<String, double>.of(base.itemMax),
     );
@@ -89,6 +90,12 @@ class AppStore extends ChangeNotifier {
     final z = zoneFor(zone);
     final next = Map<String, double>.of(z.perDay)..[category] = perDay < 0 ? 0 : perDay;
     _zones[z.name] = z.copyWith(perDay: next);
+    notifyListeners();
+  }
+
+  void setZoneDescription(String zone, String description) {
+    final z = zoneFor(zone);
+    _zones[z.name] = z.copyWith(description: description.trim());
     notifyListeners();
   }
 
@@ -812,6 +819,21 @@ class AppStore extends ChangeNotifier {
     _fire(_sb?.updateItemEmoji(item.id, item.emoji));
   }
 
+  /// Reassigns which zone's stock pool this item belongs to — e.g. fixing an
+  /// item that predates zone-scoped stock (zone == '', shown as unassigned).
+  void setItemZone(Item item, String zone) {
+    item.zone = zone;
+    notifyListeners();
+    _fire(_sb?.updateItemZone(item.id, zone));
+  }
+
+  /// Items belonging to [zone]'s own stock pool. Unassigned items (zone == ''
+  /// — anything created before stock was zone-scoped) are never included
+  /// here; they're surfaced separately so an admin can assign them.
+  List<Item> itemsForZone(String zone) => items.where((i) => i.zone == zone).toList();
+
+  List<Item> get unassignedItems => items.where((i) => i.zone.isEmpty).toList();
+
   void addItem({
     required String name,
     required String emoji,
@@ -819,6 +841,7 @@ class AppStore extends ChangeNotifier {
     required String unit,
     required double qty,
     required double reorder,
+    required String zone,
     bool notifyCustomers = false,
   }) {
     final icon = emoji.isEmpty ? '📦' : emoji;
@@ -831,6 +854,7 @@ class AppStore extends ChangeNotifier {
       openingQty: qty,
       currentQty: qty,
       reorderLevel: reorder,
+      zone: zone,
     ));
     notifyListeners();
     if (notifyCustomers) {
@@ -843,7 +867,7 @@ class AppStore extends ChangeNotifier {
     final sb = _sb;
     if (sb != null) {
       _fire(sb
-          .insertItem(name: name, emoji: icon, category: category, unit: unit, qty: qty, reorder: reorder)
+          .insertItem(name: name, emoji: icon, category: category, unit: unit, qty: qty, reorder: reorder, zone: zone)
           .then((_) => reload()));
     }
   }
@@ -946,14 +970,17 @@ class AppStore extends ChangeNotifier {
     updateOrderStatus(order, OrderStatus.viewed);
   }
 
-  /// Apply an uploaded master-stock file.
+  /// Apply an uploaded master-stock file to one zone's stock pool.
   /// [addToExisting] = true → add quantities onto existing items; false → replace.
-  ImportSummary importStock(List<ImportRow> rows, {required bool addToExisting}) {
+  /// Matches existing items by name *within that zone only* — Officers'
+  /// Rice and Sailors' Rice are separate items and this must never merge
+  /// one zone's delivery into another's count.
+  ImportSummary importStock(List<ImportRow> rows, {required bool addToExisting, required String zone}) {
     var added = 0;
     var updated = 0;
     final newRows = <Map<String, dynamic>>[];
     for (final r in rows) {
-      final match = items.where((i) => i.name.toLowerCase() == r.name.toLowerCase());
+      final match = items.where((i) => i.name.toLowerCase() == r.name.toLowerCase() && i.zone == zone);
       if (match.isNotEmpty) {
         final it = match.first;
         if (addToExisting) {
@@ -983,6 +1010,7 @@ class AppStore extends ChangeNotifier {
           openingQty: r.qty,
           currentQty: r.qty,
           reorderLevel: r.reorder,
+          zone: zone,
         ));
         added++;
         newRows.add({
@@ -993,6 +1021,7 @@ class AppStore extends ChangeNotifier {
           'opening_qty': r.qty,
           'current_qty': r.qty,
           'reorder_level': r.reorder,
+          'zone': zone,
         });
       }
     }

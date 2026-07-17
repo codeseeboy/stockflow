@@ -202,6 +202,11 @@ class SupabaseService {
   Future<void> updateItemEmoji(String id, String emoji) =>
       client.from('items').update({'emoji': emoji}).eq('id', id);
 
+  /// The zone this item's stock pool belongs to (Officers' rice vs Sailors'
+  /// rice are separate items, separately tracked).
+  Future<void> updateItemZone(String id, String zone) =>
+      client.from('items').update({'zone': zone}).eq('id', id);
+
   Future<void> insertItem({
     required String name,
     required String emoji,
@@ -209,22 +214,37 @@ class SupabaseService {
     required String unit,
     required double qty,
     required double reorder,
-  }) =>
-      client.from('items').insert({
-        'name': name,
-        'emoji': emoji,
-        'category': category,
-        'unit': unit,
-        'opening_qty': qty,
-        'current_qty': qty,
-        'reorder_level': reorder,
-      });
+    String zone = '',
+  }) async {
+    final payload = {
+      'name': name,
+      'emoji': emoji,
+      'category': category,
+      'unit': unit,
+      'opening_qty': qty,
+      'current_qty': qty,
+      'reorder_level': reorder,
+      'zone': zone,
+    };
+    try {
+      await client.from('items').insert(payload);
+    } catch (_) {
+      // Older schema without the zone column yet — retry without it rather
+      // than lose the item entirely.
+      await client.from('items').insert(payload..remove('zone'));
+    }
+  }
 
   /// Bulk insert for imports — one network call and one realtime event for the
   /// whole sheet, instead of one per row (which made the UI reload repeatedly).
   Future<void> insertItems(List<Map<String, dynamic>> rows) async {
     if (rows.isEmpty) return;
-    await client.from('items').insert(rows);
+    try {
+      await client.from('items').insert(rows);
+    } catch (_) {
+      // Older schema without the zone column yet.
+      await client.from('items').insert([for (final r in rows) {...r}..remove('zone')]);
+    }
   }
 
   Future<void> insertUser({
@@ -329,6 +349,7 @@ class SupabaseService {
       openingQty: _d(r['opening_qty']),
       currentQty: _d(r['current_qty']),
       reorderLevel: _d(r['reorder_level']),
+      zone: (r['zone'] as String?) ?? '',
     );
   }
 

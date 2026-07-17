@@ -45,12 +45,18 @@ class _DemandBuilderScreenState extends State<DemandBuilderScreen> {
       ? _month.firstDay
       : _month.firstDay.add(Duration(days: (_week - 1) * 7));
 
-  /// Items valid for the current ration type, grouped by category.
+  /// Items valid for the current ration type, grouped by category. Once a
+  /// zone is picked, only that zone's own stock (plus items that predate
+  /// zone-scoped stock) is offered — a demand for Officers must never let
+  /// the admin curate it from Sailors' separate stock pool.
   Map<String, List<Item>> _grouped(AppStore store) {
     final map = <String, List<Item>>{};
     for (final cat in kCategories) {
       final inCat = store.items
-          .where((i) => i.category == cat.name && itemAllowedIn(_type, i.category, i.name))
+          .where((i) =>
+              i.category == cat.name &&
+              itemAllowedIn(_type, i.category, i.name) &&
+              (_zone.isEmpty || i.zone.isEmpty || i.zone == _zone))
           .toList();
       if (inCat.isNotEmpty) map[cat.name] = inCat;
     }
@@ -133,7 +139,14 @@ class _DemandBuilderScreenState extends State<DemandBuilderScreen> {
                             const DropdownMenuItem(value: '', child: Text('All zones (everyone)')),
                             for (final z in store.zoneNames) DropdownMenuItem(value: z, child: Text(z)),
                           ],
-                          onChanged: (v) => setState(() => _zone = v ?? ''),
+                          onChanged: (v) => setState(() {
+                            _zone = v ?? '';
+                            // Zones don't share stock — re-default the ticked
+                            // items to whatever's actually available for the
+                            // newly picked zone rather than leaving stale
+                            // ticks from a different zone's pool.
+                            _reseedForType(store);
+                          }),
                         ),
                       ),
                       const Divider(height: 18),

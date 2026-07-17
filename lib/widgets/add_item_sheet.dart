@@ -7,22 +7,25 @@ import '../utils/item_icon_brain.dart';
 import 'emoji_picker.dart';
 import 'notify_customers_sheet.dart';
 
-/// Opens the add-item sheet (dashboard, inventory, anywhere).
-void showAddItemSheet(BuildContext context, AppStore store) {
+/// Opens the add-item sheet (dashboard, inventory, anywhere). [initialZone]
+/// preselects which zone's stock pool the new item joins — pass the zone
+/// whose inventory view the admin was already looking at.
+void showAddItemSheet(BuildContext context, AppStore store, {String? initialZone}) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (_) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: AddItemSheet(store: store),
+      child: AddItemSheet(store: store, initialZone: initialZone),
     ),
   );
 }
 
 class AddItemSheet extends StatefulWidget {
   final AppStore store;
-  const AddItemSheet({super.key, required this.store});
+  final String? initialZone;
+  const AddItemSheet({super.key, required this.store, this.initialZone});
 
   @override
   State<AddItemSheet> createState() => _AddItemSheetState();
@@ -35,6 +38,7 @@ class _AddItemSheetState extends State<AddItemSheet> {
   String _emoji = '📦';
   String _category = kCategories.first.name;
   String _unit = 'kg';
+  late String _zone = widget.initialZone ?? (widget.store.zoneNames.isNotEmpty ? widget.store.zoneNames.first : '');
   bool _emojiLocked = false;
   bool _notifyCustomers = true;
   ItemVisualSuggestion? _suggestion;
@@ -160,6 +164,16 @@ class _AddItemSheetState extends State<AddItemSheet> {
                 ),
               ],
             ),
+            const SizedBox(height: 14),
+            if (widget.store.zoneNames.isEmpty)
+              const Text('No zones yet — create one first from the Zones page.')
+            else
+              DropdownButtonFormField<String>(
+                initialValue: widget.store.zoneNames.contains(_zone) ? _zone : widget.store.zoneNames.first,
+                decoration: const InputDecoration(labelText: 'Zone', prefixIcon: Icon(Icons.shield_moon_outlined)),
+                items: [for (final z in widget.store.zoneNames) DropdownMenuItem(value: z, child: Text(z))],
+                onChanged: (v) => setState(() => _zone = v ?? _zone),
+              ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Notify customers'),
@@ -186,6 +200,7 @@ class _AddItemSheetState extends State<AddItemSheet> {
                     unit: _unit,
                     qty: q,
                     reorder: r,
+                    zone: _zone,
                     notifyCustomers: false,
                   );
                   Navigator.pop(context);

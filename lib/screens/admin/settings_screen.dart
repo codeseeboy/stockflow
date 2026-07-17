@@ -131,7 +131,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _aboutRow('Version', '1.6.4'),
+                      _aboutRow('Version', '1.7.1'),
                       const Divider(height: 24),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,

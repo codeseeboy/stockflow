@@ -13,7 +13,8 @@ import '../../utils/stock_import.dart';
 import '../../widgets/ui_kit.dart';
 
 class ImportStockScreen extends StatefulWidget {
-  const ImportStockScreen({super.key});
+  final String? initialZone;
+  const ImportStockScreen({super.key, this.initialZone});
 
   @override
   State<ImportStockScreen> createState() => _ImportStockScreenState();
@@ -25,6 +26,14 @@ class _ImportStockScreenState extends State<ImportStockScreen> {
   List<String> _warnings = const [];
   bool _addToExisting = true;
   bool _busy = false;
+  String? _zone;
+
+  @override
+  void initState() {
+    super.initState();
+    final store = context.read<AppStore>();
+    _zone = widget.initialZone ?? (store.zoneNames.isNotEmpty ? store.zoneNames.first : null);
+  }
 
   Future<void> _pick() async {
     setState(() => _busy = true);
@@ -93,16 +102,102 @@ class _ImportStockScreenState extends State<ImportStockScreen> {
 
   void _apply() {
     if (_rows.isEmpty) return;
-    final summary = context.read<AppStore>().importStock(_rows, addToExisting: _addToExisting);
+    final zone = _zone;
+    if (zone == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Create a zone first — every item belongs to one.')));
+      return;
+    }
+    final summary = context.read<AppStore>().importStock(_rows, addToExisting: _addToExisting, zone: zone);
     Navigator.of(context).pop();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Import done. ${summary.added} new, ${summary.updated} updated')),
+      SnackBar(content: Text('Import done for $zone. ${summary.added} new, ${summary.updated} updated')),
     );
+  }
+
+  /// Lets the admin fix a row right in the preview — a wrong category, a
+  /// name the auto-detect got from the wrong column, or a quantity the sheet
+  /// simply didn't have — instead of the only options being "accept as-is"
+  /// or "go edit the spreadsheet and re-upload".
+  Future<void> _editRow(int index) async {
+    final row = _rows[index];
+    final nameCtrl = TextEditingController(text: row.name);
+    final unitCtrl = TextEditingController(text: row.unit);
+    final qtyCtrl = TextEditingController(text: row.qty > 0 ? fmtNum(row.qty) : '');
+    final reorderCtrl = TextEditingController(text: row.reorder > 0 ? fmtNum(row.reorder) : '');
+    String category = kCategories.any((c) => c.name == row.category) ? row.category : kCategories.first.name;
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + MediaQuery.viewInsetsOf(ctx).bottom),
+        child: StatefulBuilder(
+          builder: (ctx, setSt) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Fix this row', style: Theme.of(ctx).textTheme.titleLarge),
+              const SizedBox(height: 16),
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Item name', prefixIcon: Icon(Icons.inventory_2_outlined))),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: category,
+                decoration: const InputDecoration(labelText: 'Category', prefixIcon: Icon(Icons.category_outlined)),
+                items: [for (final c in kCategories) DropdownMenuItem(value: c.name, child: Text(c.name))],
+                onChanged: (v) => setSt(() => category = v ?? category),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: qtyCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Quantity', prefixIcon: Icon(Icons.numbers_rounded)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: unitCtrl,
+                    decoration: const InputDecoration(labelText: 'Unit', prefixIcon: Icon(Icons.straighten_rounded)),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reorderCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Reorder level', prefixIcon: Icon(Icons.flag_outlined)),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (saved != true || !mounted) return;
+    setState(() {
+      final updated = _rows.toList();
+      updated[index] = row.copyWith(
+        name: nameCtrl.text.trim().isEmpty ? row.name : nameCtrl.text.trim(),
+        category: category,
+        unit: unitCtrl.text.trim().isEmpty ? row.unit : unitCtrl.text.trim(),
+        qty: double.tryParse(qtyCtrl.text.trim()) ?? 0,
+        reorder: double.tryParse(reorderCtrl.text.trim()) ?? 0,
+      );
+      _rows = updated;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final store = context.watch<AppStore>();
     return Scaffold(
       appBar: AppBar(title: const Text('Import master stock')),
       body: SingleChildScrollView(
@@ -125,12 +220,23 @@ class _ImportStockScreenState extends State<ImportStockScreen> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                _UploadZone(fileName: _fileName, busy: _busy, onPick: _pick),
-                const SizedBox(height: 18),
-                _ModeSelector(
-                  addToExisting: _addToExisting,
-                  onChanged: (v) => setState(() => _addToExisting = v),
-                ),
+                if (store.zoneNames.isEmpty)
+                  const EmptyState(icon: Icons.shield_moon_outlined, title: 'No zones yet', subtitle: 'Create a zone first — every item\'s stock belongs to one.')
+                else ...[
+                  DropdownButtonFormField<String>(
+                    initialValue: store.zoneNames.contains(_zone) ? _zone : store.zoneNames.first,
+                    decoration: const InputDecoration(labelText: 'Zone this stock belongs to', prefixIcon: Icon(Icons.shield_moon_outlined)),
+                    items: [for (final z in store.zoneNames) DropdownMenuItem(value: z, child: Text(z))],
+                    onChanged: (v) => setState(() => _zone = v),
+                  ),
+                  const SizedBox(height: 18),
+                  _UploadZone(fileName: _fileName, busy: _busy, onPick: _pick),
+                  const SizedBox(height: 18),
+                  _ModeSelector(
+                    addToExisting: _addToExisting,
+                    onChanged: (v) => setState(() => _addToExisting = v),
+                  ),
+                ],
                 if (_warnings.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   ..._warnings.map((w) => Padding(
@@ -150,7 +256,7 @@ class _ImportStockScreenState extends State<ImportStockScreen> {
                 else if (_rows.isEmpty)
                   const EmptyState(icon: Icons.error_outline_rounded, title: 'No rows found', subtitle: 'Check the file has a header row and data below it.')
                 else
-                  _Preview(rows: _rows),
+                  _Preview(rows: _rows, onEditRow: _editRow),
                 const SizedBox(height: 22),
                 SizedBox(
                   width: double.infinity,
@@ -319,7 +425,8 @@ class _ColChip extends StatelessWidget {
 
 class _Preview extends StatelessWidget {
   final List<ImportRow> rows;
-  const _Preview({required this.rows});
+  final ValueChanged<int> onEditRow;
+  const _Preview({required this.rows, required this.onEditRow});
 
   @override
   Widget build(BuildContext context) {
@@ -341,6 +448,8 @@ class _Preview extends StatelessWidget {
                   const SizedBox(width: 8),
                   Pill('${rows.where((r) => r.qty <= 0).length} missing qty', color: AppColors.warning, icon: Icons.warning_amber_rounded),
                 ],
+                const Spacer(),
+                Text('Tap a row to fix it', style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
               ],
             ),
           ),
@@ -353,56 +462,74 @@ class _Preview extends StatelessWidget {
                 Expanded(flex: 3, child: Text('CATEGORY', style: t.labelMedium)),
                 Expanded(flex: 2, child: Text('QTY', style: t.labelMedium, textAlign: TextAlign.end)),
                 Expanded(flex: 2, child: Text('REORDER', style: t.labelMedium, textAlign: TextAlign.end)),
+                const SizedBox(width: 22),
               ],
             ),
           ),
-          ...rows.take(50).map((r) {
-            final cat = categoryOf(r.category);
-            final flagged = r.qty <= 0;
-            return Container(
-              color: flagged ? AppColors.warningWash : null,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 4,
-                    child: Row(children: [
-                      if (flagged) ...[
-                        const Icon(Icons.warning_amber_rounded, size: 15, color: AppColors.warning),
-                        const SizedBox(width: 6),
-                      ],
-                      Text(r.emoji, style: const TextStyle(fontSize: 16)),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(r.name, style: t.titleSmall, overflow: TextOverflow.ellipsis)),
-                    ]),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Row(children: [
-                      Icon(cat.icon, size: 13, color: cat.color),
-                      const SizedBox(width: 4),
-                      Flexible(child: Text(r.category, style: t.bodySmall, overflow: TextOverflow.ellipsis)),
-                    ]),
-                  ),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      flagged ? 'no qty' : '${fmtNum(r.qty)} ${r.unit}',
-                      style: t.bodySmall?.copyWith(color: flagged ? AppColors.warning : null, fontWeight: flagged ? FontWeight.w700 : null),
-                      textAlign: TextAlign.end,
-                    ),
-                  ),
-                  Expanded(flex: 2, child: Text(fmtNum(r.reorder), style: t.bodySmall, textAlign: TextAlign.end)),
-                ],
-              ),
-            );
-          }),
+          for (var i = 0; i < rows.length && i < 50; i++) ...[
+            _PreviewRow(row: rows[i], onTap: () => onEditRow(i)),
+          ],
           if (rows.length > 50)
             Padding(
               padding: const EdgeInsets.all(14),
-              child: Text('+ ${rows.length - 50} more…', style: t.bodySmall),
+              child: Text('+ ${rows.length - 50} more… (edit the first 50, or fix the sheet directly for the rest)', style: t.bodySmall),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _PreviewRow extends StatelessWidget {
+  final ImportRow row;
+  final VoidCallback onTap;
+  const _PreviewRow({required this.row, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final cat = categoryOf(row.category);
+    final flagged = row.qty <= 0;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        color: flagged ? AppColors.warningWash : null,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 4,
+              child: Row(children: [
+                if (flagged) ...[
+                  const Icon(Icons.warning_amber_rounded, size: 15, color: AppColors.warning),
+                  const SizedBox(width: 6),
+                ],
+                Text(row.emoji, style: const TextStyle(fontSize: 16)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(row.name, style: t.titleSmall, overflow: TextOverflow.ellipsis)),
+              ]),
+            ),
+            Expanded(
+              flex: 3,
+              child: Row(children: [
+                Icon(cat.icon, size: 13, color: cat.color),
+                const SizedBox(width: 4),
+                Flexible(child: Text(row.category, style: t.bodySmall, overflow: TextOverflow.ellipsis)),
+              ]),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                flagged ? 'no qty' : '${fmtNum(row.qty)} ${row.unit}',
+                style: t.bodySmall?.copyWith(color: flagged ? AppColors.warning : null, fontWeight: flagged ? FontWeight.w700 : null),
+                textAlign: TextAlign.end,
+              ),
+            ),
+            Expanded(flex: 2, child: Text(fmtNum(row.reorder), style: t.bodySmall, textAlign: TextAlign.end)),
+            SizedBox(width: 22, child: Icon(Icons.edit_rounded, size: 14, color: scheme.onSurfaceVariant)),
+          ],
+        ),
       ),
     );
   }

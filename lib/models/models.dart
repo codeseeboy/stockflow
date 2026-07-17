@@ -115,6 +115,7 @@ Category categoryOf(String name) =>
 class RationZone {
   final String name; // 'Officers', 'Commanders', …
   final String level; // short badge label
+  final String description; // optional free text: who this zone covers
   final Map<String, double> perDay; // entitlement per person per DAY, by category
   final Map<String, double> itemMax; // optional per-item cap, by item name
   final double defaultPerDay;
@@ -122,6 +123,7 @@ class RationZone {
   const RationZone({
     required this.name,
     required this.level,
+    this.description = '',
     this.perDay = const {},
     this.itemMax = const {},
     this.defaultPerDay = 0.05,
@@ -145,10 +147,11 @@ class RationZone {
 
   double maxForItem(String itemName) => itemMax[itemName] ?? double.infinity;
 
-  RationZone copyWith({String? name, String? level, Map<String, double>? perDay, Map<String, double>? itemMax}) =>
+  RationZone copyWith({String? name, String? level, String? description, Map<String, double>? perDay, Map<String, double>? itemMax}) =>
       RationZone(
         name: name ?? this.name,
         level: level ?? this.level,
+        description: description ?? this.description,
         perDay: perDay ?? this.perDay,
         itemMax: itemMax ?? this.itemMax,
         defaultPerDay: defaultPerDay,
@@ -185,6 +188,12 @@ RationZone rationZoneFor(String name) {
 }
 
 /// A stock item (also carries its own live quantity for this prototype).
+///
+/// [zone] scopes this item's stock pool to one designation — Officers' rice
+/// and Sailors' rice are two separate [Item]s with their own quantities, not
+/// one shared count. Empty means "unassigned" — the state every item created
+/// before zone-scoped stock existed is left in, so nothing already on record
+/// vanishes; those still show (grouped separately) until an admin assigns them.
 class Item {
   final String id;
   String name;
@@ -194,6 +203,7 @@ class Item {
   double openingQty;
   double currentQty;
   double reorderLevel;
+  String zone;
 
   Item({
     required this.id,
@@ -204,6 +214,7 @@ class Item {
     required this.openingQty,
     required this.currentQty,
     required this.reorderLevel,
+    this.zone = '',
   });
 
   StockStatus get status {
@@ -229,6 +240,7 @@ class Item {
         'openingQty': openingQty,
         'currentQty': currentQty,
         'reorderLevel': reorderLevel,
+        'zone': zone,
       };
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -240,6 +252,7 @@ class Item {
         openingQty: (j['openingQty'] as num?)?.toDouble() ?? 0,
         currentQty: (j['currentQty'] as num?)?.toDouble() ?? 0,
         reorderLevel: (j['reorderLevel'] as num?)?.toDouble() ?? 0,
+        zone: (j['zone'] as String?) ?? '',
       );
 }
 
@@ -339,10 +352,15 @@ class OrderCycle {
   /// True when the admin has hand-picked the varieties on this demand.
   bool get hasCuratedList => itemIds.isNotEmpty;
 
-  /// Whether an article appears on this demand list: it must be valid for the
-  /// demand's ration type, and — once the admin has curated the list — be one
-  /// of the varieties they added.
+  /// Whether an article appears on this demand list: it must belong to this
+  /// demand's zone (or be unassigned, for items that predate zone-scoped
+  /// stock), be valid for the demand's ration type, and — once the admin has
+  /// curated the list — be one of the varieties they added.
   bool includes(Item item) {
+    // A zone-scoped demand only draws from that zone's own stock (plus
+    // unassigned items); a demand open to everyone (no designation) still
+    // shows every zone's items — it isn't itself zone-scoped.
+    if (designation.isNotEmpty && item.zone.isNotEmpty && item.zone != designation) return false;
     if (!itemAllowedIn(type, item.category, item.name)) return false;
     return itemIds.isEmpty || itemIds.contains(item.id);
   }

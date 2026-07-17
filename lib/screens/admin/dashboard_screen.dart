@@ -290,15 +290,42 @@ class _AttentionRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           TextButton(
-            onPressed: () {
-              store.restock(item, item.openingQty - item.currentQty <= 0 ? item.openingQty : item.openingQty - item.currentQty);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item.name} restocked')));
-            },
+            onPressed: () => _restock(context, store, item),
             child: const Text('Restock'),
           ),
         ],
       ),
     );
+  }
+
+  /// Lets the admin type the restocked quantity instead of guessing one —
+  /// the old one-tap version silently added zero whenever an item's opening
+  /// quantity was itself zero (common for freshly-imported items), so
+  /// "Restock" looked like it did nothing.
+  Future<void> _restock(BuildContext context, AppStore store, Item item) async {
+    final deficit = item.openingQty - item.currentQty;
+    final suggested = deficit > 0 ? deficit : (item.reorderLevel > 0 ? item.reorderLevel * 2 : 10.0);
+    final ctrl = TextEditingController(text: fmtNum(suggested));
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Restock ${item.name}'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(labelText: 'Add this many ${item.unit}', prefixIcon: const Icon(Icons.add_box_outlined)),
+          onSubmitted: (v) => Navigator.pop(ctx, double.tryParse(v.trim())),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, double.tryParse(ctrl.text.trim())), child: const Text('Restock')),
+        ],
+      ),
+    );
+    if (amount == null || amount <= 0 || !context.mounted) return;
+    store.restock(item, amount);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item.name} restocked (+${fmtNum(amount)} ${item.unit})')));
   }
 }
 

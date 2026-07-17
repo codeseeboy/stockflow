@@ -200,63 +200,115 @@ final Map<String, String> _articleToCategory = {
 String? rikCategoryForArticle(String articleName) =>
     _articleToCategory[articleName.trim().toLowerCase()];
 
+// Common wordings seen across different units' own sheets — including the
+// exact labels used in the real RIK Officers export (typos and all: that
+// sheet says "CERIALS", "R/OIL", "VEGETABLE FRESH", not the canonical names).
+const _rikAliases = <String, String>{
+  'cereal': 'Cereals',
+  'cereals': 'Cereals',
+  'cerials': 'Cereals', // sheet typo, seen in the field
+  'cerial': 'Cereals',
+  'grain': 'Cereals',
+  'grains': 'Cereals',
+  'atta': 'Cereals',
+  'rice': 'Cereals',
+  'bread': 'Cereals',
+  'pulses': 'Dal',
+  'pulse': 'Dal',
+  'oil': 'Refined Oil',
+  'r/oil': 'Refined Oil',
+  'refined oil': 'Refined Oil',
+  'edible oil': 'Refined Oil',
+  'meat': 'Meat',
+  'chicken': 'Meat',
+  'mutton': 'Meat',
+  'fish': 'Meat',
+  'vegetable': 'Vegetables',
+  'vegetables': 'Vegetables',
+  'veg': 'Vegetables',
+  'fruit': 'Fruit',
+  'fruits': 'Fruit',
+  'egg': 'Eggs',
+  'eggs': 'Eggs',
+  'milk': 'Milk',
+  'tea': 'Tea/Coffee',
+  'coffee': 'Tea/Coffee',
+  'tea/coffee': 'Tea/Coffee',
+  'sugar': 'Sugar',
+  'salt': 'Salt',
+  'butter': 'Butter',
+  'potato': 'Potato',
+  'potatoes': 'Potato',
+  'onion': 'Onion',
+  'onions': 'Onion',
+  'condiment': 'Condiments',
+  'condiments': 'Condiments',
+  'spices': 'Condiments',
+  'masala': 'Condiments',
+  'dalia': 'Dalia',
+  'lpg': 'LPG',
+  'gas': 'LPG',
+};
+
+/// True when [longer] starts with [shorter] at a real word boundary — i.e.
+/// [shorter] is either the whole string or is followed by a non-letter/digit,
+/// not just an arbitrary prefix in the middle of the next word.
+bool _prefixWordMatch(String longer, String shorter) {
+  if (shorter.isEmpty || !longer.startsWith(shorter)) return false;
+  if (longer.length == shorter.length) return true;
+  return !RegExp(r'[a-z0-9]').hasMatch(longer[shorter.length]);
+}
+
 /// Match a free-text category name (from an uploaded sheet) to a RIK category.
 /// Returns null when nothing matches, so a bad row can be reported rather than
 /// silently landing in the wrong bucket.
+///
+/// Real sheets qualify the category with things this app doesn't care about —
+/// a parenthetical list of articles ("CERIALS (ATTA/ RICE/ ...)"), or a
+/// trailing "FRESH"/"DRY" that's about the item, not the entitlement bucket —
+/// so those are stripped before matching, in addition to straight lookups.
 String? matchRikCategory(String text) {
-  final t = text.trim().toLowerCase();
+  var t = text.trim().toLowerCase();
   if (t.isEmpty) return null;
-  for (final c in kRikOfficers) {
-    if (c.name.toLowerCase() == t) return c.name;
+
+  String? lookup(String s) {
+    if (s.isEmpty) return null;
+    for (final c in kRikOfficers) {
+      if (c.name.toLowerCase() == s) return c.name;
+    }
+    final alias = _rikAliases[s];
+    if (alias != null) return alias;
+    for (final c in kRikOfficers) {
+      final n = c.name.toLowerCase();
+      // A word-boundary prefix match only — a bare startsWith would let
+      // "Dal" (4 chars) swallow "Dalia & Sago" just because "dal" happens to
+      // be a literal prefix of "dalia", silently misfiling one category's
+      // rate under a completely different one.
+      if (_prefixWordMatch(n, s) || _prefixWordMatch(s, n)) return c.name;
+    }
+    return null;
   }
-  // Common wordings from the unit's sheets.
-  const aliases = <String, String>{
-    'cereal': 'Cereals',
-    'grain': 'Cereals',
-    'grains': 'Cereals',
-    'atta': 'Cereals',
-    'rice': 'Cereals',
-    'bread': 'Cereals',
-    'pulses': 'Dal',
-    'pulse': 'Dal',
-    'oil': 'Refined Oil',
-    'refined oil': 'Refined Oil',
-    'edible oil': 'Refined Oil',
-    'meat': 'Meat',
-    'chicken': 'Meat',
-    'mutton': 'Meat',
-    'fish': 'Meat',
-    'vegetable': 'Vegetables',
-    'vegetables': 'Vegetables',
-    'veg': 'Vegetables',
-    'fruit': 'Fruit',
-    'fruits': 'Fruit',
-    'egg': 'Eggs',
-    'eggs': 'Eggs',
-    'milk': 'Milk',
-    'tea': 'Tea/Coffee',
-    'coffee': 'Tea/Coffee',
-    'tea/coffee': 'Tea/Coffee',
-    'sugar': 'Sugar',
-    'salt': 'Salt',
-    'butter': 'Butter',
-    'potato': 'Potato',
-    'potatoes': 'Potato',
-    'onion': 'Onion',
-    'onions': 'Onion',
-    'condiment': 'Condiments',
-    'condiments': 'Condiments',
-    'spices': 'Condiments',
-    'masala': 'Condiments',
-    'dalia': 'Dalia',
-    'lpg': 'LPG',
-    'gas': 'LPG',
-  };
-  final alias = aliases[t];
-  if (alias != null) return alias;
-  for (final c in kRikOfficers) {
-    final n = c.name.toLowerCase();
-    if (n.startsWith(t) || t.startsWith(n)) return c.name;
+
+  final direct = lookup(t);
+  if (direct != null) return direct;
+
+  // Strip "(...)" qualifiers and words that describe the item, not the bucket.
+  final cleaned = t
+      .replaceAll(RegExp(r'\(.*?\)'), ' ')
+      .replaceAll(RegExp(r'\b(fresh|dry|dried|whole|split|tinned|powder)\b'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (cleaned.isNotEmpty && cleaned != t) {
+    final viaClean = lookup(cleaned);
+    if (viaClean != null) return viaClean;
+    t = cleaned;
+  }
+
+  // Last resort: any individual word (slash- or space-separated) that's a
+  // known alias on its own — catches short forms like "R/OIL".
+  for (final w in t.split(RegExp(r'[\s/]+'))) {
+    final alias = _rikAliases[w];
+    if (alias != null) return alias;
   }
   return null;
 }

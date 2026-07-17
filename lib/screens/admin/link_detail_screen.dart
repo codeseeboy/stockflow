@@ -158,9 +158,13 @@ class LinkDetailScreen extends StatelessWidget {
   /// Edit which varieties are on this demand after it's opened — same "only
   /// ticked items reach the customer" rule as when raising it.
   Future<void> _editItems(BuildContext context, AppStore store, OrderCycle cycle) async {
-    // Candidates = every article valid for this demand's ration type.
+    // Candidates = every article valid for this demand's ration type and
+    // zone — a zone-scoped demand only offers that zone's own stock (plus
+    // items that predate zone-scoped stock), never another zone's pool.
     final candidates = store.items
-        .where((i) => itemAllowedIn(cycle.type, i.category, i.name))
+        .where((i) =>
+            itemAllowedIn(cycle.type, i.category, i.name) &&
+            (cycle.designation.isEmpty || i.zone.isEmpty || i.zone == cycle.designation))
         .toList();
     final selected = <String>{
       ...(cycle.hasCuratedList ? cycle.itemIds : candidates.map((i) => i.id)),

@@ -55,6 +55,11 @@ class IconPickerTile extends StatelessWidget {
   }
 }
 
+/// Pseudo-zone shown for items that predate zone-scoped stock (zone == '') —
+/// never mixed into a real zone's list, just surfaced so an admin can assign
+/// them somewhere instead of them silently vanishing from Inventory.
+const _kUnassigned = 'Unassigned';
+
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
 
@@ -66,11 +71,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
   String _query = '';
   String _category = 'All';
   bool _onlyLow = false;
+  String? _zone;
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    var items = store.items.where((i) {
+    final unassigned = store.unassignedItems;
+    final tabs = [...store.zoneNames, if (unassigned.isNotEmpty) _kUnassigned];
+    if (_zone == null || !tabs.contains(_zone)) {
+      _zone = tabs.isNotEmpty ? tabs.first : null;
+    }
+    final zone = _zone;
+    final scoped = zone == null ? const <Item>[] : (zone == _kUnassigned ? unassigned : store.itemsForZone(zone));
+    final addZone = zone == _kUnassigned ? null : zone;
+    var items = scoped.where((i) {
       final matchQ = _query.isEmpty || i.name.toLowerCase().contains(_query.toLowerCase());
       final matchC = _category == 'All' || i.category == _category;
       final matchLow = !_onlyLow || i.status != StockStatus.inStock;
@@ -79,11 +93,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: kIsWeb ? null : FloatingActionButton.extended(
-        onPressed: () => showAddItemSheet(context, store),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add item'),
-      ),
+      floatingActionButton: kIsWeb || tabs.isEmpty
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => showAddItemSheet(context, store, initialZone: addZone),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add item'),
+            ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
@@ -93,39 +109,70 @@ class _InventoryScreenState extends State<InventoryScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Toolbar(
-                  query: _query,
-                  onQuery: (v) => setState(() => _query = v),
-                  onlyLow: _onlyLow,
-                  onToggleLow: () => setState(() => _onlyLow = !_onlyLow),
-                  onImport: () => _openImport(context),
-                  onAdd: () => showAddItemSheet(context, store),
-                ),
-                const SizedBox(height: 14),
-                _CategoryFilter(selected: _category, onSelect: (c) => setState(() => _category = c)),
-                const SizedBox(height: 18),
-                if (items.isEmpty)
+                if (tabs.isEmpty)
                   const Padding(
                     padding: EdgeInsets.only(top: 60),
-                    child: EmptyState(icon: Icons.search_off_rounded, title: 'No items found', subtitle: 'Try a different search or filter.'),
+                    child: EmptyState(
+                      icon: Icons.shield_moon_outlined,
+                      title: 'No zones yet',
+                      subtitle: 'Create a zone from the Zones page first — every item\'s stock belongs to one.',
+                    ),
                   )
-                else
-                  LayoutBuilder(builder: (context, c) {
-                    final cols = c.maxWidth > 1040
-                        ? 3
-                        : c.maxWidth > 680
-                            ? 2
-                            : 1;
-                    final w = (c.maxWidth - (cols - 1) * 14) / cols;
-                    return Wrap(
-                      spacing: 14,
-                      runSpacing: 14,
-                      children: [
-                        for (final item in items)
-                          SizedBox(width: w, child: _ItemCard(item: item, store: store)),
-                      ],
-                    );
-                  }),
+                else ...[
+                  _ZoneTabs(zones: tabs, selected: zone, onSelect: (z) => setState(() => _zone = z)),
+                  const SizedBox(height: 14),
+                  if (zone != null && zone != _kUnassigned) _ZoneEntitlementSummary(store: store, zoneName: zone),
+                  if (zone == _kUnassigned)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppColors.warningWash,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.info_outline_rounded, size: 16, color: AppColors.warning),
+                          const SizedBox(width: 8),
+                          const Expanded(child: Text('These items predate zone-scoped stock. Open one and assign it to a zone.')),
+                        ]),
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  _Toolbar(
+                    query: _query,
+                    onQuery: (v) => setState(() => _query = v),
+                    onlyLow: _onlyLow,
+                    onToggleLow: () => setState(() => _onlyLow = !_onlyLow),
+                    onImport: () => _openImport(context, addZone),
+                    onAdd: () => showAddItemSheet(context, store, initialZone: addZone),
+                  ),
+                  const SizedBox(height: 14),
+                  _CategoryFilter(selected: _category, onSelect: (c) => setState(() => _category = c)),
+                  const SizedBox(height: 18),
+                  if (items.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 60),
+                      child: EmptyState(icon: Icons.search_off_rounded, title: 'No items found', subtitle: 'Try a different search or filter.'),
+                    )
+                  else
+                    LayoutBuilder(builder: (context, c) {
+                      final cols = c.maxWidth > 1040
+                          ? 3
+                          : c.maxWidth > 680
+                              ? 2
+                              : 1;
+                      final w = (c.maxWidth - (cols - 1) * 14) / cols;
+                      return Wrap(
+                        spacing: 14,
+                        runSpacing: 14,
+                        children: [
+                          for (final item in items)
+                            SizedBox(width: w, child: _ItemCard(item: item, store: store)),
+                        ],
+                      );
+                    }),
+                ],
               ],
             ),
           ),
@@ -134,9 +181,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  void _openImport(BuildContext context) {
+  void _openImport(BuildContext context, String? zone) {
     if (kIsWeb) {
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ImportStockScreen()));
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImportStockScreen(initialZone: zone)));
       return;
     }
     showDialog(
@@ -154,7 +201,133 @@ class _InventoryScreenState extends State<InventoryScreen> {
       ),
     );
   }
+}
 
+/// Zone selector — including the "Unassigned" pseudo-zone when relevant —
+/// so Inventory never silently mixes one zone's stock into another's list.
+class _ZoneTabs extends StatelessWidget {
+  final List<String> zones;
+  final String? selected;
+  final ValueChanged<String> onSelect;
+  const _ZoneTabs({required this.zones, required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final z in zones)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                selected: selected == z,
+                onSelected: (_) => onSelect(z),
+                avatar: z == _kUnassigned ? const Icon(Icons.help_outline_rounded, size: 16) : const Icon(Icons.shield_moon_outlined, size: 16),
+                label: Text(z),
+                selectedColor: AppColors.brandWash,
+                labelStyle: TextStyle(fontWeight: FontWeight.w700, color: selected == z ? AppColors.brandDark : null),
+                shape: const StadiumBorder(),
+                side: BorderSide(color: selected == z ? AppColors.brand : Theme.of(context).colorScheme.outline),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Ties this zone's stock to its entitlement scale — per category, the daily
+/// rate, how many units its customers draw a month, how much is actually on
+/// the shelf right now, and roughly how many days that covers at the current
+/// customer count. The same three-numbers framing as the customer Balance
+/// tab, just at the store's scale instead of one person's.
+class _ZoneEntitlementSummary extends StatelessWidget {
+  final AppStore store;
+  final String zoneName;
+  const _ZoneEntitlementSummary({required this.store, required this.zoneName});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final zone = store.zoneFor(zoneName);
+    final month = store.currentMonth;
+    final customerCount = store.customersInZone(zoneName).length;
+    final zoneItems = store.itemsForZone(zoneName);
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${zone.name} · entitlement vs stock', style: t.titleSmall),
+                  if (zone.description.isNotEmpty) Text(zone.description, style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            Pill('$customerCount customers', color: AppColors.cDairy),
+          ]),
+          const SizedBox(height: 10),
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+          for (final cat in kCategories) ...[
+            _ZoneCategoryRow(zone: zone, month: month, category: cat.name, items: zoneItems, customerCount: customerCount),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ZoneCategoryRow extends StatelessWidget {
+  final RationZone zone;
+  final RationMonth month;
+  final String category;
+  final List<Item> items;
+  final int customerCount;
+  const _ZoneCategoryRow({required this.zone, required this.month, required this.category, required this.items, required this.customerCount});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final cat = categoryOf(category);
+    final stock = items.where((i) => i.category == category).fold<double>(0, (s, i) => s + i.currentQty);
+    final perDay = zone.perDayFor(category);
+    final neededPerDay = perDay * customerCount;
+    final daysLeft = neededPerDay > 0 ? stock / neededPerDay : null;
+    final tight = daysLeft != null && daysLeft < 7;
+
+    return Row(
+      children: [
+        Icon(cat.icon, size: 15, color: cat.color),
+        const SizedBox(width: 8),
+        Expanded(flex: 3, child: Text(category, style: t.bodyMedium)),
+        Expanded(
+          flex: 2,
+          child: Text('${fmtNum(perDay)}/day · ${fmtNum(zone.monthlyAllowance(category, month))}/mo', style: t.bodySmall, textAlign: TextAlign.end),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: Text('${fmtNum(stock)} in stock', style: t.bodySmall?.copyWith(fontWeight: FontWeight.w600), textAlign: TextAlign.end),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 84,
+          child: daysLeft == null
+              ? Text(customerCount == 0 ? 'no customers' : '—', style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant), textAlign: TextAlign.end)
+              : Pill('~${daysLeft.round()}d left', color: tight ? AppColors.danger : AppColors.success),
+        ),
+      ],
+    );
+  }
 }
 
 class _Toolbar extends StatelessWidget {
@@ -341,6 +514,7 @@ class _ItemEditorState extends State<_ItemEditor> {
   late final TextEditingController _qty = TextEditingController(text: fmtNum(widget.item.currentQty));
   late final TextEditingController _reorder = TextEditingController(text: fmtNum(widget.item.reorderLevel));
   late String _emoji = widget.item.emoji;
+  late String _zone = widget.item.zone;
 
   @override
   void dispose() {
@@ -399,6 +573,19 @@ class _ItemEditorState extends State<_ItemEditor> {
             icon: const Icon(Icons.refresh_rounded, size: 18),
             label: Text('Restock to opening (${fmtNum(item.openingQty)} ${item.unit})'),
           ),
+          const SizedBox(height: 16),
+          Text('Zone (this item\'s own stock pool)', style: t.labelMedium),
+          const SizedBox(height: 8),
+          if (widget.store.zoneNames.isEmpty)
+            const Text('No zones exist yet.')
+          else
+            DropdownButtonFormField<String>(
+              initialValue: widget.store.zoneNames.contains(_zone) ? _zone : null,
+              decoration: const InputDecoration(prefixIcon: Icon(Icons.shield_moon_outlined)),
+              hint: const Text('Unassigned'),
+              items: [for (final z in widget.store.zoneNames) DropdownMenuItem(value: z, child: Text(z))],
+              onChanged: (v) => setState(() => _zone = v ?? ''),
+            ),
           const SizedBox(height: 22),
           SizedBox(
             width: double.infinity,
@@ -409,6 +596,7 @@ class _ItemEditorState extends State<_ItemEditor> {
                 if (q != null) widget.store.setStock(item, q);
                 if (r != null) widget.store.setReorder(item, r);
                 if (_emoji != item.emoji) widget.store.setEmoji(item, _emoji);
+                if (_zone != item.zone) widget.store.setItemZone(item, _zone);
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item.name} updated')));
               },

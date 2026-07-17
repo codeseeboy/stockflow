@@ -55,6 +55,13 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
   // reopening the app never re-fires alerts for messages already on file.
   final DateTime _sessionStart = DateTime.now();
 
+  // Mutable so a server-side zone change can be picked up in place. This used
+  // to be handled by tearing down and re-pushing the entire CustomerShell,
+  // which — if it ever fired while the guided tour was mid-render — disposed
+  // the tour's overlay state out from under it and left the screen stuck
+  // dimmed. A plain setState can never do that.
+  late String _designation = widget.designation;
+
   final TourController _tour = TourController();
 
   @override
@@ -113,8 +120,11 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
 
   /// Pull the latest zone/designation from Supabase and update the locally
   /// saved profile so the customer sees the correct demand cycles without
-  /// having to sign out and sign back in.
+  /// having to sign out and sign back in. Skipped right after a fresh signup
+  /// — the zone we just sent to the server is authoritative for that mount,
+  /// and there's no reason to second-guess our own write a second later.
   Future<void> _syncDesignationFromServer(AppStore store) async {
+    if (widget.isNewUser) return;
     try {
       final p = await store.myProfile();
       if (p == null || !mounted) return;
@@ -131,24 +141,10 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
           guest: saved.guest,
           accountCreatedAt: saved.accountCreatedAt,
         ).save();
-        // Restart the shell so openCyclesFor() picks up the new designation.
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            PageRouteBuilder(
-              transitionDuration: const Duration(milliseconds: 300),
-              pageBuilder: (_, _, _) => CustomerShell(
-                name: saved.name,
-                phone: saved.phone,
-                email: saved.email,
-                address: saved.address,
-                designation: serverZone,
-              ),
-              transitionsBuilder: (_, anim, _, child) =>
-                  FadeTransition(opacity: anim, child: child),
-            ),
-            (r) => false,
-          );
-        }
+        // Update in place — no navigation, no rebuilding this shell from
+        // scratch. A full replacement here used to be able to tear down the
+        // guided tour's overlay mid-render and leave the screen stuck dimmed.
+        if (mounted) setState(() => _designation = serverZone);
       }
     } catch (_) {
       // Network failure — keep existing designation, silently ignore.
@@ -168,7 +164,7 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
     final myOrders = customerOrdersFor(store, widget.name, widget.phone).map((o) => o.cycleId).toSet();
     var changed = false;
 
-    for (final c in store.openCyclesFor(widget.designation)) {
+    for (final c in store.openCyclesFor(_designation)) {
       final closesAt = DateTime(c.weekEnd.year, c.weekEnd.month, c.weekEnd.day, 23, 59);
       final left = closesAt.difference(DateTime.now());
 
@@ -245,7 +241,7 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       _HomeTab(
         name: widget.name,
         phone: widget.phone,
-        designation: widget.designation,
+        designation: _designation,
         onOrderNow: () => setState(() => _index = 1),
         onOpenBalance: () => setState(() => _index = 2),
         onOpenHistory: () => setState(() => _index = 3),
@@ -253,11 +249,11 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       OrderForm(
         name: widget.name,
         phone: widget.phone,
-        designation: widget.designation,
+        designation: _designation,
         onOpenBalance: () => setState(() => _index = 2),
       ),
-      BalanceScreen(name: widget.name, phone: widget.phone, designation: widget.designation),
-      _MyOrdersTab(name: widget.name, phone: widget.phone, designation: widget.designation, onOrderNow: () => setState(() => _index = 1)),
+      BalanceScreen(name: widget.name, phone: widget.phone, designation: _designation),
+      _MyOrdersTab(name: widget.name, phone: widget.phone, designation: _designation, onOrderNow: () => setState(() => _index = 1)),
       _ProfileTab(
         name: widget.name,
         phone: widget.phone,

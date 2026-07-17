@@ -56,31 +56,53 @@ class ZonesScreen extends StatelessWidget {
   const ZonesScreen({super.key});
 
   Future<void> _newZone(BuildContext context, AppStore store) async {
-    final ctrl = TextEditingController();
-    String copyFrom = store.zoneNames.isNotEmpty ? store.zoneNames.first : '';
+    final nameCtrl = TextEditingController();
+    final forWhomCtrl = TextEditingController();
+    const startEmpty = '— Start empty —';
+    String startFrom = startEmpty;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('New zone / designation'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('A zone is a designation — Officers, Commanders, Sailors — with its own entitlement scale.'),
-            const SizedBox(height: 14),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Name', prefixIcon: Icon(Icons.shield_moon_outlined)),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: copyFrom,
-              decoration: const InputDecoration(labelText: 'Start from', prefixIcon: Icon(Icons.copy_all_outlined)),
-              items: [for (final z in store.zoneNames) DropdownMenuItem(value: z, child: Text('$z scale'))],
-              onChanged: (v) => copyFrom = v ?? copyFrom,
-            ),
-          ],
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('A zone is a designation — Officers, Commanders, Sailors — with its own entitlement scale.'),
+              const SizedBox(height: 14),
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Zone name', prefixIcon: Icon(Icons.shield_moon_outlined)),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: forWhomCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'For whom (optional)',
+                  hintText: 'e.g. Officers Mess, HQ Building',
+                  prefixIcon: Icon(Icons.groups_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: startFrom,
+                decoration: const InputDecoration(labelText: 'Entitlement scale', prefixIcon: Icon(Icons.copy_all_outlined)),
+                items: [
+                  const DropdownMenuItem(value: startEmpty, child: Text(startEmpty)),
+                  for (final z in store.zoneNames) DropdownMenuItem(value: z, child: Text('Copy from $z')),
+                ],
+                onChanged: (v) => startFrom = v ?? startFrom,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'You can upload the unit\'s entitlement Excel right after creating the zone.',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -89,11 +111,31 @@ class ZonesScreen extends StatelessWidget {
       ),
     );
     if (ok == true) {
-      final created = store.addZone(ctrl.text, copyFrom: copyFrom.isEmpty ? null : copyFrom);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(created ? '${ctrl.text.trim()} zone created' : 'That zone already exists'),
-        ));
+      final created = store.addZone(
+        nameCtrl.text,
+        copyFrom: startFrom == startEmpty ? null : startFrom,
+        description: forWhomCtrl.text,
+      );
+      if (!context.mounted) return;
+      final name = nameCtrl.text.trim();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(created ? '$name zone created' : 'That zone already exists'),
+      ));
+      if (created) {
+        final upload = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('Upload entitlement Excel for $name?'),
+            content: const Text('You can also do this later from the zone\'s page.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Later')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Upload now')),
+            ],
+          ),
+        );
+        if (upload == true && context.mounted) {
+          await importEntitlementSheet(context, store, store.zoneFor(name));
+        }
       }
     }
   }
@@ -173,6 +215,10 @@ class _ZoneCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(zone.name, style: t.titleLarge),
+          if (zone.description.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(zone.description, style: t.bodySmall?.copyWith(color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
           const SizedBox(height: 2),
           Text('${fmtNum(zone.monthlyTotal(store.currentMonth))} units / person · ${store.currentMonth.label}', style: t.bodyMedium),
           const SizedBox(height: 14),
@@ -261,6 +307,28 @@ class ZoneDetailScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  onTap: () => _editZoneDescription(context, store, zone),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Row(
+                      children: [
+                        Icon(Icons.groups_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            zone.description.isEmpty ? 'Add who this zone covers (optional)' : zone.description,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: zone.description.isEmpty ? Theme.of(context).colorScheme.onSurfaceVariant : null,
+                                fontStyle: zone.description.isEmpty ? FontStyle.italic : FontStyle.normal),
+                          ),
+                        ),
+                        Icon(Icons.edit_rounded, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      ],
+                    ),
+                  ),
+                ),
                 // ---- Summary stats ----
                 LayoutBuilder(builder: (context, c) {
                   final cols = c.maxWidth > 720 ? 4 : 2;
@@ -295,6 +363,27 @@ class ZoneDetailScreen extends StatelessWidget {
   }
 }
 
+Future<void> _editZoneDescription(BuildContext context, AppStore store, RationZone zone) async {
+  final ctrl = TextEditingController(text: zone.description);
+  final v = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('For whom'),
+      content: TextField(
+        controller: ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(hintText: 'e.g. Officers Mess, HQ Building', prefixIcon: Icon(Icons.groups_outlined)),
+        onSubmitted: (t) => Navigator.pop(ctx, t),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Save')),
+      ],
+    ),
+  );
+  if (v != null) store.setZoneDescription(zone.name, v);
+}
+
 class _CriteriaCard extends StatelessWidget {
   final AppStore store;
   final RationZone zone;
@@ -314,7 +403,7 @@ class _CriteriaCard extends StatelessWidget {
             subtitle: 'RIK ${zone.name} · per-person-per-day rates. A month = rate × ${month.days} days for ${month.label}.',
             info: 'Tap a rate to edit, or import the unit’s Excel. Every allowance — a demand or a whole month — is derived from these per-day rates.',
             action: OutlinedButton.icon(
-              onPressed: () => _importSheet(context, store, zone),
+              onPressed: () => importEntitlementSheet(context, store, zone),
               icon: const Icon(Icons.upload_file_rounded, size: 18),
               label: const Text('Import Excel'),
             ),
@@ -377,9 +466,13 @@ class _CriteriaCard extends StatelessWidget {
     );
   }
 
-  /// Import the unit's entitlement Excel and apply it to this zone's per-day
-  /// scale. Unmatched categories are reported, not silently dropped.
-  Future<void> _importSheet(BuildContext context, AppStore store, RationZone zone) async {
+}
+
+/// Import the unit's entitlement Excel and apply it to a zone's per-day
+/// scale. Rows that didn't auto-match a RIK category are never silently
+/// dropped — the admin picks the right one (or Skip) for each right here.
+/// Shared by the zone detail screen's "Import Excel" and the New Zone dialog.
+Future<void> importEntitlementSheet(BuildContext context, AppStore store, RationZone zone) async {
     final messenger = ScaffoldMessenger.of(context);
     final file = await pickStockFile();
     if (file == null) return;
@@ -387,59 +480,132 @@ class _CriteriaCard extends StatelessWidget {
     if (!context.mounted) return;
 
     final valid = result.valid;
-    if (valid.isEmpty) {
+    final unmatched = result.rows.where((r) => r.category.isEmpty).toList();
+    if (valid.isEmpty && unmatched.isEmpty) {
       final why = result.warnings.isNotEmpty ? result.warnings.first : 'No entitlement rows recognised.';
       messenger.showSnackBar(SnackBar(content: Text(why)));
       return;
     }
 
-    final apply = await showDialog<bool>(
+    final picks = List<String?>.filled(unmatched.length, null);
+
+    final toApply = await showDialog<List<EntitlementRow>>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Apply to ${zone.name}?'),
-        content: SizedBox(
-          width: 380,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('${valid.length} categories recognised from ${file.name}:'),
-              const SizedBox(height: 10),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (final r in valid)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text('• ${r.category} — ${fmtNum(r.perDay)}/day', style: Theme.of(ctx).textTheme.bodySmall),
-                        ),
-                      for (final w in result.warnings)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(w, style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: AppColors.warning)),
-                        ),
-                    ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          title: Text('Apply to ${zone.name}?'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(unmatched.isEmpty
+                    ? '${valid.length} categories recognised from ${file.name}:'
+                    : '${valid.length} recognised, ${unmatched.length} need a category picked from ${file.name}:'),
+                const SizedBox(height: 10),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final r in valid)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Row(children: [
+                              const Icon(Icons.check_circle_rounded, size: 14, color: AppColors.success),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text('${r.category} — ${fmtNum(r.perDay)}/day  ·  "${r.rawCategory}"',
+                                    style: Theme.of(ctx).textTheme.bodySmall, overflow: TextOverflow.ellipsis),
+                              ),
+                            ]),
+                          ),
+                        if (unmatched.isNotEmpty) ...[
+                          const Divider(height: 18),
+                          Row(children: [
+                            const Icon(Icons.help_outline_rounded, size: 15, color: AppColors.warning),
+                            const SizedBox(width: 6),
+                            Text('Not auto-matched — pick a category or leave as Skip',
+                                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700)),
+                          ]),
+                          const SizedBox(height: 8),
+                          for (var i = 0; i < unmatched.length; i++)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: Text('"${unmatched[i].rawCategory}" — ${fmtNum(unmatched[i].perDay)}/day',
+                                        style: Theme.of(ctx).textTheme.bodySmall, overflow: TextOverflow.ellipsis),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 2,
+                                    child: DropdownButtonFormField<String?>(
+                                      initialValue: picks[i],
+                                      isDense: true,
+                                      isExpanded: true,
+                                      decoration: const InputDecoration(
+                                        isDense: true,
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                      ),
+                                      hint: const Text('Skip', overflow: TextOverflow.ellipsis),
+                                      items: [
+                                        const DropdownMenuItem<String?>(value: null, child: Text('Skip')),
+                                        for (final c in kRikOfficers)
+                                          DropdownMenuItem<String?>(value: c.name, child: Text(c.name, overflow: TextOverflow.ellipsis)),
+                                      ],
+                                      onChanged: (v) => setSt(() => picks[i] = v),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                        if (result.warnings.isNotEmpty) ...[
+                          const Divider(height: 18),
+                          for (final w in result.warnings)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(w, style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: AppColors.warning)),
+                            ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                final chosen = <EntitlementRow>[...valid];
+                for (var i = 0; i < unmatched.length; i++) {
+                  final p = picks[i];
+                  if (p != null) {
+                    chosen.add(EntitlementRow(category: p, rawCategory: unmatched[i].rawCategory, perDay: unmatched[i].perDay));
+                  }
+                }
+                Navigator.pop(ctx, chosen);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Apply')),
-        ],
       ),
     );
-    if (apply == true) {
-      final summary = store.importEntitlement(zone.name, valid);
+    if (toApply != null && toApply.isNotEmpty) {
+      final summary = store.importEntitlement(zone.name, toApply);
       messenger.showSnackBar(SnackBar(content: Text('Updated ${summary.updated} categories for ${zone.name}')));
     }
-  }
+}
 
-  Future<void> _addItemMax(BuildContext context, AppStore store, RationZone zone) async {
+Future<void> _addItemMax(BuildContext context, AppStore store, RationZone zone) async {
     final names = store.items.map((i) => i.name).where((n) => !zone.itemMax.containsKey(n)).toList()..sort();
     if (names.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All items already have a cap')));
@@ -480,7 +646,6 @@ class _CriteriaCard extends StatelessWidget {
       final v = double.tryParse(ctrl.text.trim()) ?? 0;
       if (v > 0) store.setZoneItemMax(zone.name, selected, v);
     }
-  }
 }
 
 class _EditRow extends StatelessWidget {

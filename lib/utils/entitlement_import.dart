@@ -78,7 +78,7 @@ List<List<String>> _csvToTable(String text) {
 
 EntitlementImportResult _parse(List<List<String>> table) {
   final warnings = <String>[];
-  final headerIndex = table.indexWhere((r) => r.any((c) => c.trim().isNotEmpty));
+  final headerIndex = _findHeaderRow(table);
   if (headerIndex < 0) {
     return const EntitlementImportResult([], ['The file looks empty.']);
   }
@@ -105,6 +105,13 @@ EntitlementImportResult _parse(List<List<String>> table) {
     return EntitlementImportResult(const [], warnings);
   }
 
+  // Real ration sheets merge the category cell down a whole block of
+  // alternate/in-lieu items — "CERIALS" stated once, then blank rows for
+  // ATTA / RICE / MILLETS variants, each with its OWN entitlement figure
+  // for that specific substitute. The category's rate is the one on its
+  // first (named) row; a blank category cell means "still the previous
+  // group's alternate item", which this app doesn't track a separate rate
+  // for — so those rows are skipped rather than overwriting the real rate.
   String at(List<String> row, int? idx) =>
       (idx != null && idx >= 0 && idx < row.length) ? row[idx].trim() : '';
 
@@ -141,4 +148,27 @@ double _num(String s) {
   if (s.isEmpty) return 0;
   final cleaned = s.replaceAll(RegExp(r'[^0-9.\-]'), '');
   return double.tryParse(cleaned) ?? 0;
+}
+
+/// Finds the real column-header row among the first few rows of the sheet.
+/// Many official sheets lead with a merged title row ("LIST OF ITEMS...")
+/// that only has one non-blank cell once decoded — picking the first
+/// non-blank row (the naive approach) grabs that title instead of the actual
+/// header, and every column then fails to match. The header row is the one
+/// with the most distinct non-blank cells: a title spans one merged cell,
+/// a real header has one label per column.
+int _findHeaderRow(List<List<String>> table) {
+  final limit = table.length < 10 ? table.length : 10;
+  var best = -1;
+  var bestCount = 0;
+  for (var i = 0; i < limit; i++) {
+    final count = table[i].where((c) => c.trim().isNotEmpty).length;
+    if (count == 0) continue;
+    if (best == -1) best = i;
+    if (count > bestCount) {
+      bestCount = count;
+      best = i;
+    }
+  }
+  return best;
 }
