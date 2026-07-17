@@ -6,6 +6,7 @@ import '../../data/app_store.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/customer_orders.dart';
+import '../../utils/tour_keys.dart';
 import '../../widgets/ui_kit.dart';
 import 'order_detail_screen.dart';
 
@@ -128,11 +129,14 @@ class _BalanceScreenState extends State<BalanceScreen> {
               Text(month.label, style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 14),
 
-              _ModeSwitch(mode: _mode, onChange: (m) => setState(() {
-                _mode = m;
-                _pickedMonth = null;
-                _pickedWeek = null;
-              })),
+              KeyedSubtree(
+                key: TourKeys.balanceModeSwitch,
+                child: _ModeSwitch(mode: _mode, onChange: (m) => setState(() {
+                  _mode = m;
+                  _pickedMonth = null;
+                  _pickedWeek = null;
+                })),
+              ),
 
               if (_mode == _FilterMode.previousWeek) ...[
                 const SizedBox(height: 12),
@@ -174,23 +178,26 @@ class _BalanceScreenState extends State<BalanceScreen> {
               const SizedBox(height: 18),
 
               // ---- Three numbers, one bar. Nothing projected. ----
-              AppCard(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      _stat(context, 'Entitlement', fmtNum(monthEntitlement)),
-                      _stat(context, 'Used', fmtNum(monthUsed)),
-                      _stat(context, 'Remaining', fmtNum(monthRemaining), emphasize: true),
-                    ]),
-                    const SizedBox(height: 12),
-                    UsageBar(used01: monthTotal <= 0 ? 0 : ((monthTotal - monthRemaining) / monthTotal).clamp(0.0, 1.0), height: 10),
-                    if (carried > 0) ...[
-                      const SizedBox(height: 10),
-                      Pill('+${fmtNum(carried)} carried from ${month.previous.shortLabel}', color: AppColors.accent, icon: Icons.move_up_rounded),
+              KeyedSubtree(
+                key: TourKeys.balanceSummary,
+                child: AppCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        _stat(context, 'Entitlement', fmtNum(monthEntitlement)),
+                        _stat(context, 'Used', fmtNum(monthUsed)),
+                        _stat(context, 'Remaining', fmtNum(monthRemaining), emphasize: true),
+                      ]),
+                      const SizedBox(height: 12),
+                      UsageBar(used01: monthTotal <= 0 ? 0 : ((monthTotal - monthRemaining) / monthTotal).clamp(0.0, 1.0), height: 10),
+                      if (carried > 0) ...[
+                        const SizedBox(height: 10),
+                        Pill('+${fmtNum(carried)} carried from ${month.previous.shortLabel}', color: AppColors.accent, icon: Icons.move_up_rounded),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
 
@@ -226,7 +233,10 @@ class _BalanceScreenState extends State<BalanceScreen> {
                 Pill(zone.name, color: AppColors.brand, icon: Icons.shield_moon_outlined),
               ]),
               const SizedBox(height: 10),
-              _CategoryScopeToggle(scope: _catScope, onChange: (s) => setState(() => _catScope = s)),
+              KeyedSubtree(
+                key: TourKeys.balanceCategoryToggle,
+                child: _CategoryScopeToggle(scope: _catScope, onChange: (s) => setState(() => _catScope = s)),
+              ),
               const SizedBox(height: 10),
               ...balances.map((b) => _CategoryRow(
                     balance: b,

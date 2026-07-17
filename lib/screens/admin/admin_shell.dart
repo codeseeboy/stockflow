@@ -126,9 +126,14 @@ class _SideNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    // Deliberately dark in both themes (a fixed nav panel reads well as a
+    // permanent anchor) but built from the SAME dark tokens dark mode uses
+    // everywhere else, so toggling theme genuinely changes the sidebar too
+    // instead of leaving it frozen on a separate colour.
     return Container(
       width: 260,
-      color: const Color(0xFF1B1F24),
+      color: dark ? AppColors.dBg : const Color(0xFF1B1F24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

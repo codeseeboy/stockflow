@@ -10,8 +10,11 @@ import '../../main.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/app_prefs.dart';
+import '../../utils/app_tour.dart';
 import '../../utils/customer_orders.dart';
 import '../../utils/notification_service.dart';
+import '../../utils/tour_keys.dart';
+import '../../widgets/tour_overlay.dart';
 import '../../widgets/ui_kit.dart';
 import '../entry_screen.dart';
 import 'balance_screen.dart';
@@ -40,10 +43,13 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
   // reopening the app never re-fires alerts for messages already on file.
   final DateTime _sessionStart = DateTime.now();
 
+  final TourController _tour = TourController();
+
   @override
   void initState() {
     super.initState();
     NotificationService.init();
+    _tour.onSwitchTab = (i) => setState(() => _index = i);
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -60,12 +66,20 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted) store.reload();
       });
+      // First time this customer has ever reached the shell — walk them
+      // through it once, starting a beat after everything settles.
+      if (!TourPrefs.seen) {
+        Future<void>.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) _tour.start(buildAppTour());
+        });
+      }
     });
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _tour.dispose();
     WidgetsBinding.instance.removeObserver(this);
     context.read<AppStore>().removeListener(_onStoreUpdate);
     super.dispose();
@@ -228,9 +242,19 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       ),
       BalanceScreen(name: widget.name, phone: widget.phone, designation: widget.designation),
       _MyOrdersTab(name: widget.name, phone: widget.phone, designation: widget.designation, onOrderNow: () => setState(() => _index = 1)),
-      _ProfileTab(name: widget.name, phone: widget.phone, email: widget.email, address: widget.address),
+      _ProfileTab(
+        name: widget.name,
+        phone: widget.phone,
+        email: widget.email,
+        address: widget.address,
+        onReplayTour: () => _tour.start(buildAppTour()),
+      ),
     ];
 
+    return SpotlightOverlay(controller: _tour, child: _shellScaffold(tabs));
+  }
+
+  Widget _shellScaffold(List<Widget> tabs) {
     return Scaffold(
       body: SafeArea(
         bottom: false,
@@ -242,6 +266,7 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         ),
       ),
       bottomNavigationBar: NavigationBar(
+        key: TourKeys.navBar,
         selectedIndex: _index,
         onDestinationSelected: (i) {
           setState(() => _index = i);
@@ -503,19 +528,28 @@ class _HomeTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _HomeGreeting(name: displayName),
+              KeyedSubtree(key: TourKeys.greeting, child: _HomeGreeting(name: displayName)),
               const SizedBox(height: 14),
-              _QuickActions(onOrderNow: onOrderNow, onOpenBalance: onOpenBalance, onOpenHistory: onOpenHistory),
+              KeyedSubtree(
+                key: TourKeys.quickActions,
+                child: _QuickActions(onOrderNow: onOrderNow, onOpenBalance: onOpenBalance, onOpenHistory: onOpenHistory),
+              ),
               const SizedBox(height: 18),
-              _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
+              KeyedSubtree(
+                key: TourKeys.demandStatus,
+                child: _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
+              ),
               const SizedBox(height: 22),
               const _SectionLabel('THIS MONTH AT A GLANCE'),
               const SizedBox(height: 8),
-              _MonthTimelineCard(store: store, designation: designation),
+              KeyedSubtree(key: TourKeys.monthTimeline, child: _MonthTimelineCard(store: store, designation: designation)),
               const SizedBox(height: 22),
               const _SectionLabel('YOUR BALANCE'),
               const SizedBox(height: 8),
-              _BalanceSnapshot(store: store, name: name, phone: phone, designation: designation, onOpen: onOpenBalance),
+              KeyedSubtree(
+                key: TourKeys.balanceSnapshot,
+                child: _BalanceSnapshot(store: store, name: name, phone: phone, designation: designation, onOpen: onOpenBalance),
+              ),
               if (lastOrder != null) ...[
                 const SizedBox(height: 22),
                 const _SectionLabel('RECENT'),
@@ -1059,7 +1093,10 @@ class _MyOrdersTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('My Order History', style: t.headlineSmall),
+              KeyedSubtree(
+                key: TourKeys.historyList,
+                child: Text('My Order History', style: t.headlineSmall),
+              ),
               const SizedBox(height: 4),
               Text('Every demand you\'ve placed, with full status tracking', style: t.bodyMedium),
               const SizedBox(height: 16),
@@ -1201,7 +1238,8 @@ class _ProfileTab extends StatefulWidget {
   final String phone;
   final String email;
   final String address;
-  const _ProfileTab({required this.name, required this.phone, required this.email, required this.address});
+  final VoidCallback onReplayTour;
+  const _ProfileTab({required this.name, required this.phone, required this.email, required this.address, required this.onReplayTour});
 
   @override
   State<_ProfileTab> createState() => _ProfileTabState();
@@ -1288,33 +1326,46 @@ class _ProfileTabState extends State<_ProfileTab> {
                 ]),
               ),
               const SizedBox(height: 24),
-              AppCard(
-                child: Column(children: [
-                  Row(children: [
-                    Expanded(child: Text('Contact details', style: t.titleSmall)),
-                    TextButton.icon(
-                      onPressed: _edit,
-                      icon: const Icon(Icons.edit_outlined, size: 16),
-                      label: const Text('Edit'),
-                    ),
+              KeyedSubtree(
+                key: TourKeys.profileCard,
+                child: AppCard(
+                  child: Column(children: [
+                    Row(children: [
+                      Expanded(child: Text('Contact details', style: t.titleSmall)),
+                      TextButton.icon(
+                        onPressed: _edit,
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                        label: const Text('Edit'),
+                      ),
+                    ]),
+                    const SizedBox(height: 4),
+                    _row(context, Icons.phone_rounded, 'Phone', widget.phone.isEmpty ? 'Not set' : widget.phone),
+                    const Divider(height: 20),
+                    _row(context, Icons.mail_outline_rounded, 'Email', _email.isEmpty ? 'Not set' : _email),
+                    const Divider(height: 20),
+                    _row(context, Icons.location_on_outlined, 'Delivery address', _address.isEmpty ? 'Not set' : _address),
                   ]),
-                  const SizedBox(height: 4),
-                  _row(context, Icons.phone_rounded, 'Phone', widget.phone.isEmpty ? 'Not set' : widget.phone),
-                  const Divider(height: 20),
-                  _row(context, Icons.mail_outline_rounded, 'Email', _email.isEmpty ? 'Not set' : _email),
-                  const Divider(height: 20),
-                  _row(context, Icons.location_on_outlined, 'Delivery address', _address.isEmpty ? 'Not set' : _address),
-                ]),
+                ),
               ),
               const SizedBox(height: 16),
-              AppCard(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                child: SwitchListTile(
-                  value: theme.isDark,
-                  onChanged: (_) => theme.toggle(),
-                  secondary: Icon(theme.isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded, color: AppColors.brand),
-                  title: const Text('Dark mode', style: TextStyle(fontWeight: FontWeight.w600)),
+              KeyedSubtree(
+                key: TourKeys.profileDarkMode,
+                child: AppCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: SwitchListTile(
+                    value: theme.isDark,
+                    onChanged: (_) => theme.toggle(),
+                    secondary: Icon(theme.isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded, color: AppColors.brand),
+                    title: const Text('Dark mode', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
                 ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: TourKeys.profileReplayTour,
+                onPressed: widget.onReplayTour,
+                icon: const Icon(Icons.play_circle_outline_rounded, size: 18),
+                label: const Text('Replay app tour'),
               ),
               const SizedBox(height: 24),
               SizedBox(

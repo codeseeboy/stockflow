@@ -7,6 +7,7 @@ import '../../data/app_store.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/customer_orders.dart';
+import '../../utils/tour_keys.dart';
 import '../../widgets/ui_kit.dart';
 
 /// A friendly add/remove increment sized to the entitlement [cap] so ~6–8 taps
@@ -240,24 +241,33 @@ class _OrderFormState extends State<OrderForm> {
                     if (alreadyOrdered)
                       _AlreadyOrderedInline(cycle: cycle)
                     else ...[
-                      BalanceSummaryCard(
-                        month: cycle.month,
-                        balances: _orderedBalances(onDemand),
-                        picked: _pickedByCategory(),
-                        zoneLabel: _zone.level,
+                      KeyedSubtree(
+                        key: TourKeys.demandBalanceBar,
+                        child: BalanceSummaryCard(
+                          month: cycle.month,
+                          balances: _orderedBalances(onDemand),
+                          picked: _pickedByCategory(),
+                          zoneLabel: _zone.level,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       _DemandBanner(cycle: cycle),
                       const SizedBox(height: 14),
-                      TextField(
-                        onChanged: (v) => setState(() => _query = v),
-                        decoration: const InputDecoration(hintText: 'Search items…', prefixIcon: Icon(Icons.search_rounded)),
+                      KeyedSubtree(
+                        key: TourKeys.demandSearch,
+                        child: TextField(
+                          onChanged: (v) => setState(() => _query = v),
+                          decoration: const InputDecoration(hintText: 'Search items…', prefixIcon: Icon(Icons.search_rounded)),
+                        ),
                       ),
                       const SizedBox(height: 12),
-                      _Categories(
-                        names: cats,
-                        selected: _category,
-                        onSelect: (c) => setState(() => _category = c),
+                      KeyedSubtree(
+                        key: TourKeys.demandCategories,
+                        child: _Categories(
+                          names: cats,
+                          selected: _category,
+                          onSelect: (c) => setState(() => _category = c),
+                        ),
                       ),
                       const SizedBox(height: 16),
                       if (matches.isEmpty)

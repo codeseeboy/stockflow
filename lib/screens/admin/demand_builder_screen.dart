@@ -344,6 +344,7 @@ class _CategoryPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
     final chosen = items.where((i) => selected.contains(i.id)).length;
     final allOn = chosen == items.length;
 
@@ -378,9 +379,9 @@ class _CategoryPicker extends StatelessWidget {
                     selected: selected.contains(i.id),
                     onSelected: (on) => onToggleItem(i.id, on),
                     avatar: Text(i.emoji, style: const TextStyle(fontSize: 15)),
-                    label: Text(i.name),
+                    label: Text(i.name, style: TextStyle(color: selected.contains(i.id) ? scheme.onPrimaryContainer : null)),
                     showCheckmark: false,
-                    selectedColor: AppColors.brandWash,
+                    selectedColor: scheme.primaryContainer,
                     shape: const StadiumBorder(),
                   ),
               ],

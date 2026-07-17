@@ -220,6 +220,7 @@ class _EditItemsSheetState extends State<_EditItemsSheet> {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
     final grouped = _grouped;
     return DraggableScrollableSheet(
       expand: false,
@@ -269,9 +270,9 @@ class _EditItemsSheetState extends State<_EditItemsSheet> {
                                 selected: _selected.contains(i.id),
                                 onSelected: (on) => setState(() => on ? _selected.add(i.id) : _selected.remove(i.id)),
                                 avatar: Text(i.emoji, style: const TextStyle(fontSize: 15)),
-                                label: Text(i.name),
+                                label: Text(i.name, style: TextStyle(color: _selected.contains(i.id) ? scheme.onPrimaryContainer : null)),
                                 showCheckmark: false,
-                                selectedColor: AppColors.brandWash,
+                                selectedColor: scheme.primaryContainer,
                                 shape: const StadiumBorder(),
                               ),
                           ]),

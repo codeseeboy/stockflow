@@ -1,7 +1,7 @@
 name: stockflow
 description: "StockFlow — Inventory & weekly ordering system."
 publish_to: 'none'
-version: 1.5.2+9
+version: 1.6.0+10
 
 environment:
   sdk: ^3.11.5
