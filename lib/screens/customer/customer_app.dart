@@ -218,6 +218,7 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
         designation: widget.designation,
         onOrderNow: () => setState(() => _index = 1),
         onOpenBalance: () => setState(() => _index = 2),
+        onOpenHistory: () => setState(() => _index = 3),
       ),
       OrderForm(
         name: widget.name,
@@ -468,20 +469,23 @@ String _timeGreeting() {
   return 'Good evening';
 }
 
-/// Home keeps to three things: is a demand open, how much balance is left,
-/// and the last order. Everything else lives in its own tab.
+/// Home keeps to what matters at a glance: is a demand open, how much
+/// balance is left, one-tap shortcuts to everything else, and the last
+/// order. Everything deeper lives in its own tab, a single tap away.
 class _HomeTab extends StatelessWidget {
   final String name;
   final String phone;
   final String designation;
   final VoidCallback onOrderNow;
   final VoidCallback onOpenBalance;
+  final VoidCallback onOpenHistory;
   const _HomeTab({
     required this.name,
     required this.phone,
     required this.designation,
     required this.onOrderNow,
     required this.onOpenBalance,
+    required this.onOpenHistory,
   });
 
   @override
@@ -500,6 +504,8 @@ class _HomeTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _HomeGreeting(name: displayName),
+              const SizedBox(height: 14),
+              _QuickActions(onOrderNow: onOrderNow, onOpenBalance: onOpenBalance, onOpenHistory: onOpenHistory),
               const SizedBox(height: 18),
               _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
               const SizedBox(height: 22),
@@ -543,6 +549,59 @@ class _SectionLabel extends StatelessWidget {
           fontWeight: FontWeight.w700,
           letterSpacing: 1.1,
           color: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// One-tap shortcuts to the three things a customer reaches for most —
+/// nothing here needs a second screen or a menu, just a thumb.
+class _QuickActions extends StatelessWidget {
+  final VoidCallback onOrderNow;
+  final VoidCallback onOpenBalance;
+  final VoidCallback onOpenHistory;
+  const _QuickActions({required this.onOrderNow, required this.onOpenBalance, required this.onOpenHistory});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(child: _ActionChip(icon: Icons.add_shopping_cart_rounded, label: 'Place demand', color: AppColors.brand, onTap: onOrderNow)),
+        const SizedBox(width: 10),
+        Expanded(child: _ActionChip(icon: Icons.account_balance_wallet_rounded, label: 'My balance', color: AppColors.cDairy, onTap: onOpenBalance)),
+        const SizedBox(width: 10),
+        Expanded(child: _ActionChip(icon: Icons.history_rounded, label: 'My orders', color: AppColors.accent, onTap: onOpenHistory)),
+      ],
+    );
+  }
+}
+
+class _ActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _ActionChip({required this.icon, required this.label, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Material(
+      color: color.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          child: Column(
+            children: [
+              Icon(icon, size: 20, color: color),
+              const SizedBox(height: 6),
+              Text(label, textAlign: TextAlign.center, style: t.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: color), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
       ),
     );
