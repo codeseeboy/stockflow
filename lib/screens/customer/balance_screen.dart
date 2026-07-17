@@ -12,11 +12,9 @@ import 'order_detail_screen.dart';
 enum _FilterMode { currentWeek, previousWeek, allHistory }
 enum _CategoryScope { week, total }
 
-/// The customer's entitlement balance — kept to exactly what's asked at any
-/// moment: pick a week from a plain list, see its limit bar and what's left,
-/// compare against last week, and drill into a category only when wanted.
-/// No charts, no card walls, no projected/future numbers — only what has
-/// actually happened.
+/// The customer's entitlement balance. Three clear numbers, one honest bar,
+/// and two plain fields (Month, Week) when looking at anything other than
+/// right now — no chip rows, no charts, no projected numbers.
 class BalanceScreen extends StatefulWidget {
   final String name;
   final String phone;
@@ -31,7 +29,7 @@ class _BalanceScreenState extends State<BalanceScreen> {
   _FilterMode _mode = _FilterMode.currentWeek;
   _CategoryScope _catScope = _CategoryScope.week;
   RationMonth? _pickedMonth;
-  CalendarWeek? _selectedWeek;
+  CalendarWeek? _pickedWeek;
 
   List<Order> _activeOrders(AppStore store) => customerOrdersFor(store, widget.name, widget.phone)
       .where((o) => o.status != OrderStatus.cancelled && o.status != OrderStatus.rejected)
@@ -57,24 +55,23 @@ class _BalanceScreenState extends State<BalanceScreen> {
     final store = context.watch<AppStore>();
     final currentMonth = store.currentMonth;
     final currentWeek = calendarWeekOf(DateTime.now());
+    final lastCompletedWeek = calendarWeekOf(currentWeek.start.subtract(const Duration(days: 1)));
 
-    // Which month's weeks are on screen, and whether the picker shows.
+    // Which month is on screen, and — for "previous week" — which week.
     final RationMonth month;
-    final bool showMonthPicker;
+    CalendarWeek? week;
     switch (_mode) {
       case _FilterMode.currentWeek:
         month = currentMonth;
-        showMonthPicker = false;
+        week = currentWeek;
       case _FilterMode.previousWeek:
+        month = _pickedMonth ?? RationMonth.of(lastCompletedWeek.start);
+        week = _pickedWeek ?? lastCompletedWeek;
+        if (RationMonth.of(week.start) != month) week = weeksOfMonth(month).last;
       case _FilterMode.allHistory:
-        month = _pickedMonth ?? currentMonth.previous;
-        showMonthPicker = true;
+        month = _pickedMonth ?? currentMonth;
+        week = null;
     }
-
-    final weeks = weeksOfMonth(month);
-    final selected = _mode == _FilterMode.currentWeek
-        ? currentWeek
-        : (_selectedWeek != null && weeksOfMonth(month).any((w) => w.start == _selectedWeek!.start) ? _selectedWeek! : weeks.last);
 
     final zone = store.zoneFor(widget.designation);
     final balances = store
@@ -112,6 +109,8 @@ class _BalanceScreenState extends State<BalanceScreen> {
 
     double totalWeekMax(CalendarWeek w) => balances.fold<double>(0, (s, b) => s + weekMaxAllowed(b.category, w));
 
+    final monthEntitlement = balances.fold<double>(0, (s, b) => s + b.allowance);
+    final monthUsed = balances.fold<double>(0, (s, b) => s + b.consumed);
     final monthRemaining = balances.fold<double>(0, (s, b) => s + b.remaining);
     final monthTotal = balances.fold<double>(0, (s, b) => s + b.total);
     final carried = balances.fold<double>(0, (s, b) => s + b.carriedIn);
@@ -129,72 +128,96 @@ class _BalanceScreenState extends State<BalanceScreen> {
               Text(month.label, style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 14),
 
-              _FilterBar(
-                mode: _mode,
-                onMode: (m) => setState(() {
-                  _mode = m;
-                  _selectedWeek = null;
-                }),
-              ),
-              if (showMonthPicker) ...[
-                const SizedBox(height: 10),
-                _MonthPicker(current: currentMonth, selected: month, onSelect: (m) => setState(() {
-                  _pickedMonth = m;
-                  _selectedWeek = null;
-                })),
-              ],
-              const SizedBox(height: 16),
+              _ModeSwitch(mode: _mode, onChange: (m) => setState(() {
+                _mode = m;
+                _pickedMonth = null;
+                _pickedWeek = null;
+              })),
 
-              // ---- Overall limit bar: what's left right now, nothing projected ----
-              _LimitBar(
-                title: month == currentMonth ? 'Remaining this month' : 'Remaining in ${month.shortLabel}',
-                remaining: monthRemaining,
-                total: monthTotal,
-              ),
-              if (carried > 0) ...[
-                const SizedBox(height: 8),
-                Pill('+${fmtNum(carried)} carried from ${month.previous.shortLabel}', color: AppColors.accent, icon: Icons.move_up_rounded),
-              ],
-              const SizedBox(height: 20),
-
-              Text(
-                _mode == _FilterMode.allHistory ? 'Every week this month' : 'Pick a week',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              if (_mode == _FilterMode.allHistory)
-                for (final w in weeks)
-                  _WeekListRow(
-                    week: w,
-                    isCurrent: w.start == currentWeek.start,
-                    selected: false,
-                    remaining: totalWeekRemaining(w),
-                    total: totalWeekMax(w),
-                    onTap: () {},
-                  )
-              else
-                for (final w in weeks)
-                  _WeekListRow(
-                    week: w,
-                    isCurrent: w.start == currentWeek.start,
-                    selected: w.start == selected.start,
-                    remaining: totalWeekRemaining(w),
-                    total: totalWeekMax(w),
-                    onTap: _mode == _FilterMode.currentWeek ? null : () => setState(() => _selectedWeek = w),
+              if (_mode == _FilterMode.previousWeek) ...[
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(
+                    child: _PickerField(
+                      label: 'Month',
+                      value: month.label,
+                      onTap: () async {
+                        final picked = await _pickMonth(context, current: currentMonth, selected: month);
+                        if (picked != null) setState(() { _pickedMonth = picked; _pickedWeek = null; });
+                      },
+                    ),
                   ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _PickerField(
+                      label: 'Week',
+                      value: 'Week ${week!.number}',
+                      onTap: () async {
+                        final picked = await _pickWeek(context, month: month, selected: week!, currentWeekStart: currentWeek.start);
+                        if (picked != null) setState(() => _pickedWeek = picked);
+                      },
+                    ),
+                  ),
+                ]),
+              ],
+              if (_mode == _FilterMode.allHistory) ...[
+                const SizedBox(height: 12),
+                _PickerField(
+                  label: 'Month',
+                  value: month.label,
+                  onTap: () async {
+                    final picked = await _pickMonth(context, current: currentMonth, selected: month);
+                    if (picked != null) setState(() => _pickedMonth = picked);
+                  },
+                ),
+              ],
+              const SizedBox(height: 18),
+
+              // ---- Three numbers, one bar. Nothing projected. ----
+              AppCard(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      _stat(context, 'Entitlement', fmtNum(monthEntitlement)),
+                      _stat(context, 'Used', fmtNum(monthUsed)),
+                      _stat(context, 'Remaining', fmtNum(monthRemaining), emphasize: true),
+                    ]),
+                    const SizedBox(height: 12),
+                    UsageBar(used01: monthTotal <= 0 ? 0 : ((monthTotal - monthRemaining) / monthTotal).clamp(0.0, 1.0), height: 10),
+                    if (carried > 0) ...[
+                      const SizedBox(height: 10),
+                      Pill('+${fmtNum(carried)} carried from ${month.previous.shortLabel}', color: AppColors.accent, icon: Icons.move_up_rounded),
+                    ],
+                  ],
+                ),
+              ),
 
               if (_mode != _FilterMode.allHistory) ...[
-                const SizedBox(height: 22),
-                _WeekDetail(
+                const SizedBox(height: 20),
+                Text('This week vs last week', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 10),
+                _WeekCompare(
                   store: store,
-                  week: selected,
-                  previousWeek: calendarWeekOf(selected.start.subtract(const Duration(days: 1))),
-                  balances: balances,
-                  weekRemaining: totalWeekRemaining(selected),
-                  weekMax: totalWeekMax(selected),
-                  previousWeekRemaining: totalWeekRemaining(calendarWeekOf(selected.start.subtract(const Duration(days: 1)))),
+                  week: week!,
+                  isCurrent: week.start == currentWeek.start,
+                  weekRemaining: totalWeekRemaining(week),
+                  weekMax: totalWeekMax(week),
+                  previousWeekRemaining: totalWeekRemaining(calendarWeekOf(week.start.subtract(const Duration(days: 1)))),
                   activeOrders: activeOrders,
                 ),
+              ] else ...[
+                const SizedBox(height: 20),
+                Text('Every week in ${month.shortLabel}', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 10),
+                for (final w in weeksOfMonth(month))
+                  _WeekSummaryRow(
+                    week: w,
+                    isCurrent: w.start == currentWeek.start,
+                    remaining: totalWeekRemaining(w),
+                    total: totalWeekMax(w),
+                  ),
               ],
 
               const SizedBox(height: 22),
@@ -208,8 +231,8 @@ class _BalanceScreenState extends State<BalanceScreen> {
               ...balances.map((b) => _CategoryRow(
                     balance: b,
                     scope: _catScope,
-                    weekRemaining: _catScope == _CategoryScope.week ? (weekMaxAllowed(b.category, selected) - weekRequested(b.category, selected)).clamp(0, double.infinity) : 0,
-                    weekTotal: _catScope == _CategoryScope.week ? weekMaxAllowed(b.category, selected) : 0,
+                    weekRemaining: _catScope == _CategoryScope.week && week != null ? (weekMaxAllowed(b.category, week) - weekRequested(b.category, week)).clamp(0, double.infinity) : 0,
+                    weekTotal: _catScope == _CategoryScope.week && week != null ? weekMaxAllowed(b.category, week) : 0,
                     onTap: () => _explain(context, store, b, month),
                   )),
 
@@ -218,6 +241,49 @@ class _BalanceScreenState extends State<BalanceScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _stat(BuildContext context, String label, String value, {bool emphasize = false}) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: t.bodySmall),
+          const SizedBox(height: 2),
+          Text(value, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: emphasize ? scheme.primary : null)),
+        ],
+      ),
+    );
+  }
+
+  Future<RationMonth?> _pickMonth(BuildContext context, {required RationMonth current, required RationMonth selected}) {
+    final months = <RationMonth>[current, for (var m = current.previous, i = 0; i < 8; m = m.previous, i++) m];
+    return _pickFromSheet<RationMonth>(
+      context,
+      title: 'Choose a month',
+      options: months,
+      labelOf: (m) => m == current ? '${m.label} (current)' : m.label,
+      isSelected: (m) => m == selected,
+    );
+  }
+
+  Future<CalendarWeek?> _pickWeek(BuildContext context, {required RationMonth month, required CalendarWeek selected, required DateTime currentWeekStart}) {
+    final weeks = weeksOfMonth(month);
+    return _pickFromSheet<CalendarWeek>(
+      context,
+      title: 'Choose a week in ${month.label}',
+      options: weeks,
+      labelOf: (w) {
+        final range = w.start.month == w.end.month
+            ? 'Mon ${DateFormat('d').format(w.start)} – Sun ${DateFormat('d MMM').format(w.end)}'
+            : 'Mon ${DateFormat('d MMM').format(w.start)} – Sun ${DateFormat('d MMM').format(w.end)}';
+        final tag = w.start == currentWeekStart ? ' · current' : '';
+        return 'Week ${w.number} · $range$tag';
+      },
+      isSelected: (w) => w.start == selected.start,
     );
   }
 
@@ -231,165 +297,107 @@ class _BalanceScreenState extends State<BalanceScreen> {
   }
 }
 
-class _FilterBar extends StatelessWidget {
-  final _FilterMode mode;
-  final ValueChanged<_FilterMode> onMode;
-  const _FilterBar({required this.mode, required this.onMode});
-
-  static const _labels = {
-    _FilterMode.currentWeek: 'This week',
-    _FilterMode.previousWeek: 'Previous week',
-    _FilterMode.allHistory: 'All history',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (final m in _FilterMode.values)
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              selected: mode == m,
-              onSelected: (_) => onMode(m),
-              label: Text(_labels[m]!),
-              selectedColor: AppColors.brandWash,
-              labelStyle: TextStyle(fontWeight: FontWeight.w600, color: mode == m ? AppColors.brandDark : null),
-              shape: const StadiumBorder(),
-              side: BorderSide(color: mode == m ? AppColors.brand : Theme.of(context).colorScheme.outline),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _MonthPicker extends StatelessWidget {
-  final RationMonth current;
-  final RationMonth selected;
-  final ValueChanged<RationMonth> onSelect;
-  const _MonthPicker({required this.current, required this.selected, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    final months = <RationMonth>[current, for (var m = current.previous, i = 0; i < 5; m = m.previous, i++) m];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (final mo in months)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                selected: mo == selected,
-                onSelected: (_) => onSelect(mo),
-                label: Text(mo.shortLabel),
-                selectedColor: AppColors.brandWash,
-                labelStyle: TextStyle(fontWeight: FontWeight.w600, color: mo == selected ? AppColors.brandDark : null),
-                shape: const StadiumBorder(),
-                side: BorderSide(color: mo == selected ? AppColors.brand : Theme.of(context).colorScheme.outline),
+/// A clean, theme-aware picker sheet — a plain list, checkmark on the
+/// selected row. No colour is hardcoded, so it reads correctly in dark mode.
+Future<T?> _pickFromSheet<T>(
+  BuildContext context, {
+  required String title,
+  required List<T> options,
+  required String Function(T) labelOf,
+  required bool Function(T) isSelected,
+}) {
+  final scheme = Theme.of(context).colorScheme;
+  return showModalBottomSheet<T>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final o in options)
+                    ListTile(
+                      title: Text(labelOf(o), style: TextStyle(fontWeight: isSelected(o) ? FontWeight.w700 : FontWeight.w500)),
+                      trailing: isSelected(o) ? Icon(Icons.check_circle_rounded, color: scheme.primary) : null,
+                      selected: isSelected(o),
+                      selectedTileColor: scheme.primaryContainer.withValues(alpha: 0.5),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                      onTap: () => Navigator.pop(ctx, o),
+                    ),
+                ],
               ),
             ),
-        ],
+          ],
+        ),
       ),
-    );
-  }
+    ),
+  );
 }
 
-/// One big, honest "how much is left" bar — a fuel gauge, not a dashboard.
-class _LimitBar extends StatelessWidget {
-  final String title;
-  final double remaining;
-  final double total;
-  const _LimitBar({required this.title, required this.remaining, required this.total});
+/// Simple three-way switch — This week / Previous week / All history.
+class _ModeSwitch extends StatelessWidget {
+  final _FilterMode mode;
+  final ValueChanged<_FilterMode> onChange;
+  const _ModeSwitch({required this.mode, required this.onChange});
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final used01 = total <= 0 ? 0.0 : ((total - remaining) / total).clamp(0.0, 1.0);
-    return AppCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: t.bodyMedium),
-          const SizedBox(height: 4),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(fmtNum(remaining), style: t.displaySmall?.copyWith(color: AppColors.brandDark, fontSize: 36, height: 1)),
-              const SizedBox(width: 8),
-              Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('of ${fmtNum(total)}', style: t.bodyMedium)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          UsageBar(used01: used01, height: 10),
-        ],
-      ),
+    return SegmentedButton<_FilterMode>(
+      segments: const [
+        ButtonSegment(value: _FilterMode.currentWeek, label: Text('This week')),
+        ButtonSegment(value: _FilterMode.previousWeek, label: Text('Previous week')),
+        ButtonSegment(value: _FilterMode.allHistory, label: Text('All history')),
+      ],
+      selected: {mode},
+      onSelectionChanged: (s) => onChange(s.first),
+      showSelectedIcon: false,
+      style: const ButtonStyle(visualDensity: VisualDensity.compact),
     );
   }
 }
 
-/// A plain list row — a week, its date range, and a thin bar showing what's
-/// left of it. This is "the list" the customer picks from.
-class _WeekListRow extends StatelessWidget {
-  final CalendarWeek week;
-  final bool isCurrent;
-  final bool selected;
-  final double remaining;
-  final double total;
-  final VoidCallback? onTap;
-  const _WeekListRow({required this.week, required this.isCurrent, required this.selected, required this.remaining, required this.total, this.onTap});
+/// A bordered field that opens a picker sheet — label on top, value below,
+/// a chevron to say "tap me". Fully theme-driven; no hardcoded colours.
+class _PickerField extends StatelessWidget {
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+  const _PickerField({required this.label, required this.value, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final range = week.start.month == week.end.month
-        ? 'Mon ${DateFormat('d').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}'
-        : 'Mon ${DateFormat('d MMM').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}';
-    final used01 = total <= 0 ? 0.0 : ((total - remaining) / total).clamp(0.0, 1.0);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: selected ? AppColors.brandWash : scheme.surface,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              border: Border.all(color: selected ? AppColors.brand : scheme.outline),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 40,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('W${week.number}', style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: selected ? AppColors.brandDark : null)),
-                      if (isCurrent) Text('Now', style: t.bodySmall?.copyWith(color: AppColors.success, fontWeight: FontWeight.w700, fontSize: 10)),
-                    ],
-                  ),
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppRadius.md), border: Border.all(color: scheme.outline)),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: t.bodySmall),
+                    Text(value, style: t.titleSmall?.copyWith(fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
                 ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(range, style: t.bodySmall),
-                      const SizedBox(height: 5),
-                      UsageBar(used01: used01, height: 5),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(fmtNum(remaining), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: usageColor(used01))),
-              ],
-            ),
+              ),
+              Icon(Icons.unfold_more_rounded, size: 18, color: scheme.onSurfaceVariant),
+            ],
           ),
         ),
       ),
@@ -397,22 +405,20 @@ class _WeekListRow extends StatelessWidget {
   }
 }
 
-/// The selected week's numbers, plus last week for a quick comparison, plus
-/// exactly what was ordered that week — nothing projected forward.
-class _WeekDetail extends StatelessWidget {
+/// This week's remaining next to last week's, plus what was actually
+/// demanded — a direct, side-by-side comparison.
+class _WeekCompare extends StatelessWidget {
   final AppStore store;
   final CalendarWeek week;
-  final CalendarWeek previousWeek;
-  final List<CategoryBalance> balances;
+  final bool isCurrent;
   final double weekRemaining;
   final double weekMax;
   final double previousWeekRemaining;
   final List<Order> activeOrders;
-  const _WeekDetail({
+  const _WeekCompare({
     required this.store,
     required this.week,
-    required this.previousWeek,
-    required this.balances,
+    required this.isCurrent,
     required this.weekRemaining,
     required this.weekMax,
     required this.previousWeekRemaining,
@@ -423,6 +429,9 @@ class _WeekDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final range = week.start.month == week.end.month
+        ? 'Mon ${DateFormat('d').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}'
+        : 'Mon ${DateFormat('d MMM').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}';
     final weekOrders = activeOrders.where((o) {
       final d = o.createdAt.toLocal();
       final day = DateTime(d.year, d.month, d.day);
@@ -432,6 +441,8 @@ class _WeekDetail extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text('Week ${week.number}${isCurrent ? ' · current' : ''} · $range', style: t.bodySmall),
+        const SizedBox(height: 10),
         Row(children: [
           Expanded(
             child: Container(
@@ -440,7 +451,7 @@ class _WeekDetail extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('This week', style: t.bodySmall),
+                  Text(isCurrent ? 'This week' : 'Selected week', style: t.bodySmall),
                   Text(fmtNum(weekRemaining), style: t.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: usageColor(weekMax <= 0 ? 0 : 1 - weekRemaining / weekMax))),
                 ],
               ),
@@ -496,6 +507,64 @@ class _WeekDetail extends StatelessWidget {
   }
 }
 
+/// A read-only row for "All history" — every week of the picked month,
+/// one line each. Fully theme-driven (fixes the dark-mode contrast bug).
+class _WeekSummaryRow extends StatelessWidget {
+  final CalendarWeek week;
+  final bool isCurrent;
+  final double remaining;
+  final double total;
+  const _WeekSummaryRow({required this.week, required this.isCurrent, required this.remaining, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final range = week.start.month == week.end.month
+        ? 'Mon ${DateFormat('d').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}'
+        : 'Mon ${DateFormat('d MMM').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}';
+    final used01 = total <= 0 ? 0.0 : ((total - remaining) / total).clamp(0.0, 1.0);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: isCurrent ? scheme.primary : scheme.outline),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 42,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('W${week.number}', style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+                  if (isCurrent) Text('Now', style: t.bodySmall?.copyWith(color: scheme.primary, fontWeight: FontWeight.w700, fontSize: 10)),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(range, style: t.bodySmall),
+                  const SizedBox(height: 5),
+                  UsageBar(used01: used01, height: 5),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(fmtNum(remaining), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: usageColor(used01))),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CategoryScopeToggle extends StatelessWidget {
   final _CategoryScope scope;
   final ValueChanged<_CategoryScope> onChange;
@@ -511,6 +580,7 @@ class _CategoryScopeToggle extends StatelessWidget {
       selected: {scope},
       onSelectionChanged: (s) => onChange(s.first),
       showSelectedIcon: false,
+      style: const ButtonStyle(visualDensity: VisualDensity.compact),
     );
   }
 }
@@ -635,7 +705,7 @@ class _ExplainSheet extends StatelessWidget {
             const Divider(height: 24),
             Row(children: [
               Expanded(child: Text('Left with you', style: t.titleMedium)),
-              Text('${fmtNum(balance.remaining)} $unit', style: t.titleLarge?.copyWith(color: AppColors.brandDark, fontWeight: FontWeight.w700)),
+              Text('${fmtNum(balance.remaining)} $unit', style: t.titleLarge?.copyWith(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w700)),
             ]),
             const SizedBox(height: 6),
             Text('Whatever is left at month end is added to next month.', style: t.bodySmall),
