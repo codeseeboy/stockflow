@@ -1,6 +1,12 @@
 -- ============================================================
 -- StockFlow — Supabase schema
--- Run this in your Supabase project: SQL Editor → New query → paste → Run.
+--
+-- The single script to run: Supabase → SQL Editor → New query →
+-- paste all of this → Run. Works on a brand-new project AND on an
+-- existing one — every statement is idempotent (create-if-missing,
+-- add-column-if-missing), so re-running this after a code update is
+-- always safe and never touches existing data. dummy_data/MIGRATION.sql
+-- is now folded in here and no longer needs a separate run.
 -- ============================================================
 
 -- ---------- Enums ----------
@@ -34,6 +40,10 @@ create table if not exists profiles (
 );
 
 -- ---------- Items (master stock + live qty) ----------
+-- zone scopes an item to one designation's own stock pool — Officers' rice
+-- and Sailors' rice are separate rows with separate quantities, never one
+-- shared count. '' = unassigned (every item created before stock became
+-- zone-scoped; still shown in the app, just flagged for an admin to assign).
 create table if not exists items (
   id            uuid primary key default gen_random_uuid(),
   name          text not null,
@@ -43,9 +53,13 @@ create table if not exists items (
   opening_qty   numeric not null default 0,
   current_qty   numeric not null default 0,
   reorder_level numeric not null default 0,
+  zone          text not null default '',
   is_active     boolean not null default true,
   created_at    timestamptz not null default now()
 );
+
+-- Zone column for databases created before item stock was zone-scoped.
+alter table items add column if not exists zone text not null default '';
 
 -- ---------- Stock movements (audit trail → reports + prediction) ----------
 create table if not exists stock_movements (
@@ -93,11 +107,14 @@ create table if not exists orders (
   customer_phone  text,
   status          order_status not null default 'pending',
   order_no        bigserial,                      -- short display code: SF-<order_no>
+  status_history  jsonb not null default '[]'::jsonb, -- every status change: who, what, when
   created_at      timestamptz not null default now()
 );
 
--- Short order numbers for databases created before the column existed.
+-- Short order numbers + full status timeline, for databases created before
+-- either column existed.
 alter table orders add column if not exists order_no bigserial;
+alter table orders add column if not exists status_history jsonb not null default '[]'::jsonb;
 
 create table if not exists order_items (
   id            uuid primary key default gen_random_uuid(),

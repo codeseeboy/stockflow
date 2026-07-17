@@ -1,4 +1,10 @@
 -- ============================================================
+-- SUPERSEDED — everything below is now folded into supabase/schema.sql,
+-- which also has the newer zone-scoped items column and the order status
+-- timeline column this file was missing. Run that one instead; this file
+-- is kept only for history and is safe to ignore.
+-- ============================================================
+-- ============================================================
 -- StockFlow — migration for the meeting requirements
 -- (fresh/dry demands, entitlement month, per-demand item list,
 --  and the customer's zone/designation).
