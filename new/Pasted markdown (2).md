@@ -1,0 +1,245 @@
+# Meeting Transcript — Requirements Discussion (VERIFIED)
+**Date:** 13 July 2026  
+**Participants:** Shashikant & Sir  
+**Source:** Screen Recording 2026-07-13 122910.mp4 (~14 min 31 sec)  
+**Verification:** Full audio amplified + cleaned, then transcribed **twice** (Whisper small, then Whisper medium with domain vocabulary). This file is the careful line-by-line merge.  
+**Note:** Low original volume. Where audio was unclear: marked `[unclear]`. Domain fixes applied only when context is strong (e.g. *exercise sheet* → *Excel sheet*).
+
+---
+
+## Full Transcript (line-checked)
+
+**[00:00] Sir:**  
+The logical checks that we shall be checking. I hope these things are already there, right?
+
+**[00:06] Shashikant:**  
+Yeah, so let me just confirm what I get. So you mean like whoever is getting…
+
+**[00:12] Sir:**  
+Okay, voice is not coming. You are not audible — your mic is off.
+
+**[00:14] Shashikant:**  
+Am I audible, sir? Am I audible, I think?
+
+**[00:20] Sir:**  
+Yeah, yeah… no. *(still fixing audio)*
+
+**[00:22] Shashikant:**  
+Yeah. So as per the requirements you told — for each **entitlement** — you said, like suppose there is a new jawan or user for a fresh week. Next, suppose **June month**, okay?
+
+So for June month, there will be a criteria for that **zone**, because each user belongs to that zone, correct? Let’s consider the zone as a **designation** — like commander, officers and all, okay?
+
+So for Zone A, suppose there are all commanders, right? So for each commander there is a different type of entitlement — not same-to-same for Zone B, correct? For Zone A and Zone B there will be difference in the entitlement, the stock category, the stock order and all, right?
+
+So that has been done.
+
+**[01:08] Shashikant:**  
+The next part is: the **remaining stock must be visible on the user page** also. So suppose a user who hasn’t ordered the current week order — for a current week in this June month, there will be a weekly [demand], okay?
+
+Just confirm: for each month, suppose June — will there be every week a new link created for them, or for that one month only one link is there?
+
+**[01:38] Sir:**  
+No — every week there will be a separate new link.
+
+**[01:41] Shashikant:**  
+Okay, for each week there will be a new link.
+
+**[01:44] Sir:**  
+Basically there is **not a link**. Basically I will put a message in the group that you can now log in — your demand — we are ready to accept the demand. So that **demand page should be available**.
+
+Basically when someone, for example if I have to take ration, I will log in, from there I will go to the demand page. **Now after the unit has initiated the demand acceptance, then only that page should be visible.** Otherwise just a message that *“Demand has not started yet / Demand acceptance has not started yet.”* That’s it.
+
+**[02:14] Shashikant:**  
+Okay. So, and user will be able to see the stock that is in stock. Like suppose I am Commander A — sorry, I am Commander B — Commander A has already placed the order using that demand page. Now Commander B was on leave; he didn’t know about the orders page. Okay, so suppose he came at second-last day and he can see how much item is remaining.
+
+Okay, because there was a confusion — in the previous meeting you said stock is always there in our database, correct? So we have [not been showing / need to show] how many items are remaining. So now we have to show them how many items are remaining in our stock or not. So that one change is there, right?
+
+**[03:05] Sir:**  
+From our side — from the **inventory side** — there is **no need** to show how much stock is present in my inventory. Rather, you have to show the customer: if his entitlement is for **21 days or 22 days**, how much **balance quantity** for each and every item category is left with him. That is what we have to show to the customers — not from our [inventory] side.
+
+The **Excel sheet** that we have shared — for example, the **cereals**. Under cereals you will have atta, rice, bread, everything. Now bread is something that they can take while they are taking the **fresh ration** also, and bread again they can take in the **dry ration** demand list also.
+
+So basically when I am starting the demand list for the **first peak** *(first demand cycle/week)*, for first peak I will take only the **fresh ration**. When we say fresh — fresh means: chicken, mutton, vegetables, fruits, onion, potato, all these things, **butter** — they come under fresh criteria. Now fresh means **bread also**.
+
+- **Second week:** again I will raise a new demand for another **10 days**, again for **fresh only**.  
+- **Third week:** again I will start a new demand for another **10 days** — last 10 days of the month.  
+- **Fourth week:** I will raise a demand for **dry ration for the entire month — 30 days for dry**. In dry: all that atta, dal, rice, oil, everything — we call it dry ration. In dry, again **bread will be there**.
+
+So in the last two demands, how much bread he has taken — if he has taken **400 grams** of bread packets / rice — so already his **1.2 kg has been cut from the cereals** (from the total cereals). So this **carry-forward for the month, within the month**, should be [tracked / cut].
+
+Plus if he has taken, for example, if his total whole month’s **dal** is coming at **1.2 kg**, but we have packets of dal of **500 gram** packets — so he will take 500 + 500 = 2 packets = 1 kg — so **200 grams** will balance with him. That should be taken as **carry-forward for the next month**.
+
+**[05:21] Shashikant:**  
+Okay. So you mean — suppose for a week there is a maximum capacity and they can see what is the [remaining / balance] capacity right now. Like — correct — suppose there is a maximum capacity of **200 kg** for me; you have assigned me **200 kg of atta** for the entire month. And from that I have taken **150 kg** of atta. So now only **50 kg atta** is left. So user can see that balance currently for me — atta, there is only 50 kg left. So when you create a new order, he can only select the 50 kg, not above 50 kg — correct?
+
+**[06:06–06:09] Sir:**  
+Correct. Exactly. Yeah. Correct.
+
+**[06:10] Shashikant:**  
+So if this all data — see, for this it will not be consistent [fixed], correct? It is not consistent. So it will be in the **Excel sheet**. Because from our side we cannot fix minimum criteria or maximum criteria for a user, because we need the data so that we can update the user data. So you told that this is already present in Excel sheet — correct?
+
+**[06:37] Sir:**  
+So yes — in Excel sheet we will already give you the data. Like for the first peak, how many days he is taking — he might take **5 days** also, he might take **10 days** also, he might ask for **15 days** also. So that will be present in the Excel sheet.
+
+**[06:53] Shashikant:**  
+Okay. So in Excel sheet the data will be present… okay, got it. I just want [to confirm] — there is only one Excel sheet that you shared with us. So is there another Excel sheet data also which is remaining?
+
+**[07:09] Sir:**  
+I have to check like what I have shared — another officer, she has moved out. From what you have shared — can you share it back to me so that I can see what I have shared, or what my unit has shared with you?
+
+**[07:22] Shashikant:**  
+Actually what you have shared is the limits. Like suppose for fruits, [user] can only select this, this only… doesn’t… So this is possible. Let me see if I can share my screen.
+
+**[07:44] Sir:**  
+I will send you some samples — like how demand comes to me and how I raise the demand.
+
+**[07:50] Shashikant:**  
+Is my screen visible?
+
+**[08:01] Sir:**  
+Yes, it is visible.
+
+**[08:04] Shashikant:**  
+So now, this has been done. Just — it is a dummy website which is not updated. So as you see the screen now — this is the user app.
+
+**[09:32] Shashikant:**  
+Okay. So as I have opened the user app on website — this is the real user / customer app. So here what I have done is — in this user app, you can see I have done here **zone-wise**. Actually you cannot see the zone in website, but in app it is already present.
+
+So what I have done is — suppose I am getting here 5 kg. So you told that this **“690 kg left”** should **not** show from the inventory of the stock data / master stock data. It should show from the **user entitlement**.
+
+**[10:19] Sir:**  
+Exactly.
+
+**[10:20] Shashikant:**  
+Like suppose for this month, user has been approved of suppose **700 kg**, and now in that user’s balance for grains, it is only remaining **690 kg**. So that has been done. So, okay.
+
+And is it same for the holiday one also? Suppose I am on holiday and I am coming at the **fourth week** of this month — so I will see full balance, correct? Because I haven’t purchased anything from this app / haven’t ordered anything from this app. So in that case I will be able to see my full balance. Let’s suppose 700 kg was assigned for me in my entitlement and I was on holiday. So when I come back at fourth week, I can see all of my fresh and whatever the order limits were assigned to me.
+
+**[11:21]** *(echo / feedback)* Hello…
+
+**[11:35] Sir:**  
+I think you have to mute either your computer or your mobile. One of the things you will have to mute.
+
+**[11:44] Shashikant:**  
+Am I on for now?
+
+**[11:47] Sir:**  
+Yeah, you are on.
+
+**[11:50] Sir:**  
+So basically the idea is correct. So if the first demand / first week when I am raising the demand, if somebody forgets, or maybe somebody is not present in station, maybe he has gone on leave somewhere — so the **second week**, once he comes back for the second demand, it should be visible to him **how much quantity is balanced with him / balanced due to him**.
+
+**[12:15] Shashikant:**  
+Okay. And sir, the questions that are listed on the group — I hope that all are clear.
+
+**[12:22] Sir:**  
+Just a second. Okay.
+
+**[12:36] Shashikant:**  
+And also — suppose for each month you assign me an entitlement of some limits / capacity, and that month is now expired. So now the data is also expired, right? It will **not** add on to the next month?
+
+**[12:52] Sir:**  
+No — it **has to be added on**. It has to be expired [for that month], but it has to be added on to the next month. Because suppose I have left **100 kg** — it has to be added to the next month. It has to be added to the next month.
+
+**[13:04] Shashikant:**  
+Okay. If an item is not available — in that case what will we have to show the user?
+
+**[13:17] Sir:**  
+If in case particular item is not available — generally that kind of a situation **never arises**. So when I am raising the demand, basically the page should come to me **what all items I am adding**. If I am not adding, then obviously the customer will not see.
+
+**[13:36] Shashikant:**  
+Okay.
+
+**[13:38] Sir:**  
+Basically all the groups — like **fruits** group — I will just select the fruit group and what all varieties I am adding. There are **30 varieties** in fruits, but I will not allow all 30 varieties. From 30 varieties, I will select **9 or 10** varieties under the fruits group.
+
+Then again I will select the **vegetables** group. Under vegetables, I will again add **10 to 14** varieties.
+
+Then **cereals** group — I will add only **bread**.
+
+Then in onion and potatoes — there is just one item: onion and potatoes. That’s it.
+
+Similarly for **butter** also I will add that.
+
+If I am adding **dal**, then I will have to add **all the varieties of dal** which are available with me. So they will put the demand from that.
+
+But the overall balance is not about like in vegetable — if there are 6 varieties, the customer will not see…
+
+*(Part 1 recording ends mid-sentence here — continues directly in Part 2 below)*
+
+---
+
+## Full Transcript — PART 2 (continuation video, ~2 min 16 sec)
+**Source:** WhatsApp Video 2026-07-14 at 12.05.24 AM.mp4 · transcribed on **GPU** (CUDA, Whisper medium)
+
+**[00:00] Sir:**  
+…the overall balance is not about like in vegetables — if there are 6 varieties, the customer has selected [some], along with the quantity. If hardly 10 or 12 — or maybe 100 grams — is also balance left, that will get added in the next issue, or even if it is in the next month.
+
+So suppose from my entire month, of my **500 kg**, only **300 kg** is left — so it will be added on to the next: next 500 kg **plus** 300 kg, that is **800 kg**.
+
+**[00:36] Shashikant:**  
+Yes. Okay, the math is clear.
+
+**[00:37] Sir:**  
+And we will share you an **updated APK**. So I just want you to go through the app and the website of the **admin portal**, so that you can see the difference as per the requirements — what is remaining, what is pre-done — and you can let me know, or we can have a next conference meeting.
+
+**[01:02] Shashikant:**  
+Okay, fine. Okay sir, thank you. So we will try to [implement what you] suggested, and [decide] next meeting when we can arrange.
+
+**[01:20] Sir:**  
+After a week — next Monday, maybe.
+
+**[01:22] Shashikant:**  
+Next Monday. Yes, next Monday. We will let you know as per the… Yeah, we will let you know the next meeting deadline, because we have to just figure out how much time it will take. And we will let you know.
+
+**[01:36] Sir:**  
+Okay, sure. Yeah. Okay. Thank you.
+
+**[01:40] Shashikant:**  
+Thank you sir. Thank you.
+
+*(closing greetings; recording ends ~01:42)*
+
+---
+
+## Part 2 — New / Confirmed Requirements
+
+1. **Carry-forward confirmed with concrete math:** leftover balance (even ~100 g, or 300 kg of a 500 kg allotment) rolls into the **next issue / next month** → next month = new allotment **+** previous leftover (e.g. 500 + 300 = **800 kg**).
+2. Balance carries per selected variety along with its quantity.
+
+### Action items (Part 2)
+- **Sir:** Share an **updated APK** + admin portal website for review.
+- **Shashikant:** Go through app + admin portal, compare against requirements (what’s done vs remaining), report back.
+- **Both:** Next conference meeting tentatively **next Monday** (Shashikant to confirm timeline/deadline).
+
+---
+
+## Corrections found on careful re-check (vs first draft)
+
+| Topic | First draft | Verified (2nd pass) |
+|--------|-------------|---------------------|
+| Mic issue | vague “go off” | **Mic is off** / “Am I audible, sir?” |
+| Fresh items | missed butter | Fresh includes **butter** + bread |
+| Bread example | vague “4 gram packets” | **~400 grams** bread; cut from cereals (~1.2 kg context) |
+| Carry-forward example | only dal 200 g | Also Sir said leftover **100 kg** must go to next month |
+| Item groups at end | “foods” | **Fruits** (30 → pick 9–10), vegetables 10–14, cereals (bread), onion/potato, butter, all dal varieties |
+| Excel source | “excursion” | **Excel / exercise sheet** shared by unit |
+| Ending | cut early | Completes through dal varieties + vegetable balance note, then recording stops |
+
+---
+
+## Requirements Discussed — Confirmed Summary
+
+1. **Zone = designation** (commander / officers etc.) → different entitlements per zone.  
+2. **Weekly demand window** (not one monthly link); announce in group; demand page only after unit starts acceptance; else show “not started” message.  
+3. **Fresh weeks 1–3 (~10 days each)** vs **dry week 4 (full 30 days)**. Fresh: chicken, mutton, veg, fruits, onion, potato, butter, bread. Dry: atta, dal, rice, oil, bread.  
+4. Show **user entitlement remaining balance**, **NOT** warehouse/master inventory stock. Cap order qty to remaining balance (e.g. 200→150→50 kg atta).  
+5. Leave / late users still see **balance due to them** (full if they ordered nothing).  
+6. **Carry-forward within month** (e.g. bread deducted from cereals) and **to next month** (e.g. 200 g dal leftover; or leftover 100 kg).  
+7. Entitlement / days (5 / 10 / 15) come from **Excel** provided by Sir’s unit; share Excel back for verification; Sir will send demand samples.  
+8. Admin selects which groups/varieties appear in a demand; customer only sees added items; item “not available” usually doesn’t arise.
+
+---
+
+## Honest accuracy note
+Audio was **low** and there is echo around 11:21–11:47. Core requirements above are consistent across both transcription passes. A few short phrases (especially 00:28 “freshly…”, 07:25 fruits limits wording, and the final cut-off sentence) remain slightly uncertain — marked or paraphrased carefully above.
