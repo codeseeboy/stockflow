@@ -66,13 +66,15 @@ class _CustomerShellState extends State<CustomerShell> with WidgetsBindingObserv
       _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted) store.reload();
       });
-      // First time this customer has ever reached the shell — walk them
-      // through it once, starting a beat after everything settles.
-      if (!TourPrefs.seen) {
-        Future<void>.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) _tour.start(buildAppTour());
-        });
-      }
+      // Auto-start temporarily disabled — it's been trapping users on a
+      // dimmed screen despite two rounds of fixes, and the safest thing to
+      // do while that's being root-caused properly is not show it at all.
+      // Re-enable this block once the freeze is confirmed fixed.
+      // if (!TourPrefs.seen) {
+      //   Future<void>.delayed(const Duration(milliseconds: 500), () {
+      //     if (mounted) _tour.start(buildAppTour());
+      //   });
+      // }
     });
   }
 
@@ -1360,13 +1362,8 @@ class _ProfileTabState extends State<_ProfileTab> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                key: TourKeys.profileReplayTour,
-                onPressed: widget.onReplayTour,
-                icon: const Icon(Icons.play_circle_outline_rounded, size: 18),
-                label: const Text('Replay app tour'),
-              ),
+              // The guided tour is temporarily switched off while a display
+              // issue is being fixed properly — nothing here can trigger it.
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,

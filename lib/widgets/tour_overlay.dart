@@ -27,6 +27,7 @@ class _SpotlightOverlayState extends State<SpotlightOverlay> {
   Rect? _currentRect;
   bool _resolving = false;
   int _generation = 0;
+  Timer? _watchdog;
 
   @override
   void initState() {
@@ -37,6 +38,7 @@ class _SpotlightOverlayState extends State<SpotlightOverlay> {
   @override
   void dispose() {
     widget.controller.removeListener(_onStepChanged);
+    _watchdog?.cancel();
     super.dispose();
   }
 
@@ -48,11 +50,30 @@ class _SpotlightOverlayState extends State<SpotlightOverlay> {
       });
       return;
     }
+    final myGen = _generation + 1; // matches the generation _resolveTarget is about to claim
     _resolveTarget();
+    // Absolute last resort: whatever else might go wrong in resolution, the
+    // overlay must never sit stuck on a blank dimmed screen for more than a
+    // moment. If this generation is somehow still "resolving" after 2s —
+    // far beyond the ~200ms this normally takes — force it visible.
+    _watchdog?.cancel();
+    _watchdog = Timer(const Duration(seconds: 2), () {
+      if (mounted && myGen == _generation && _resolving) {
+        setState(() => _resolving = false);
+      }
+    });
   }
 
   /// Waits for the tab switch / layout to settle, scrolls the target into
   /// view if it's inside a Scrollable, then measures its screen rect.
+  ///
+  /// Wrapped in try/finally: if the user taps Next fast enough that this call
+  /// gets superseded mid-flight, every exit path — including the early
+  /// `return`s below — must still leave `_resolving` correctly settled for
+  /// whichever call turns out to be the latest one. Without that guarantee, a
+  /// stale call could abort having already set `_resolving = true` and never
+  /// clear it, leaving the whole screen stuck dimmed with no card and no way
+  /// to tap Skip.
   Future<void> _resolveTarget() async {
     final myGen = ++_generation;
     final step = widget.controller.current;
@@ -63,51 +84,65 @@ class _SpotlightOverlayState extends State<SpotlightOverlay> {
       setState(() {
         _previousRect = _currentRect;
         _currentRect = null;
+        _resolving = false;
       });
       return;
     }
 
-    setState(() => _resolving = true);
-
-    BuildContext? ctx;
-    // Tab switches happen inside an IndexedStack, and post-frame timing can
-    // land before that tab's subtree is attached — retry briefly. The common
-    // case resolves on the first pass; this only matters when a target
-    // genuinely isn't mounted (e.g. no demand window open right now), so it
-    // stays short rather than holding a blank screen.
-    for (var i = 0; i < 6; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 35));
-      if (!mounted || myGen != _generation) return;
-      ctx = step.targetKey!.currentContext;
-      if (ctx != null) break;
+    if (mounted && myGen == _generation) {
+      setState(() => _resolving = true);
     }
 
-    if (ctx != null && ctx.mounted) {
-      try {
-        await Scrollable.ensureVisible(
-          ctx,
-          alignment: 0.35,
-          duration: const Duration(milliseconds: 260),
-          curve: Curves.easeOutCubic,
-        );
-      } catch (_) {
-        // Not inside a Scrollable, or already visible — fine either way.
+    try {
+      BuildContext? ctx;
+      // Tab switches happen inside an IndexedStack, and post-frame timing can
+      // land before that tab's subtree is attached — retry briefly. The
+      // common case resolves on the first pass; this only matters when a
+      // target genuinely isn't mounted (e.g. no demand window open right
+      // now), so it stays short rather than holding a blank screen.
+      for (var i = 0; i < 6; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 35));
+        if (!mounted || myGen != _generation) return;
+        ctx = step.targetKey!.currentContext;
+        if (ctx != null) break;
+      }
+
+      if (ctx != null && ctx.mounted) {
+        try {
+          await Scrollable.ensureVisible(
+            ctx,
+            alignment: 0.35,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+          );
+        } catch (_) {
+          // Not inside a Scrollable, or already visible — fine either way.
+        }
+      }
+      if (!mounted || myGen != _generation) return;
+
+      Rect? rect;
+      final box = ctx?.findRenderObject();
+      if (box is RenderBox && box.hasSize && box.attached) {
+        final topLeft = box.localToGlobal(Offset.zero);
+        rect = topLeft & box.size;
+      }
+
+      if (mounted && myGen == _generation) {
+        setState(() {
+          _previousRect = _currentRect;
+          _currentRect = rect;
+          _resolving = false;
+        });
+      }
+    } finally {
+      // Belt and suspenders: whatever path this call exited through, if it's
+      // still the latest generation and somehow left `_resolving` set, force
+      // it off rather than ever leave the overlay stuck.
+      if (mounted && myGen == _generation && _resolving) {
+        setState(() => _resolving = false);
       }
     }
-    if (!mounted || myGen != _generation) return;
-
-    Rect? rect;
-    final box = ctx?.findRenderObject();
-    if (box is RenderBox && box.hasSize && box.attached) {
-      final topLeft = box.localToGlobal(Offset.zero);
-      rect = topLeft & box.size;
-    }
-
-    setState(() {
-      _previousRect = _currentRect;
-      _currentRect = rect;
-      _resolving = false;
-    });
   }
 
   @override
@@ -157,26 +192,52 @@ class _TourLayer extends StatelessWidget {
     return Positioned.fill(
       child: Material(
         color: Colors.transparent,
-        child: GestureDetector(
-          // Swallow taps on the scrim so the app underneath can't be touched
-          // mid-tour — the only way through is Back / Skip / Next.
-          onTap: () {},
-          child: TweenAnimationBuilder<Rect?>(
-            tween: RectTween(begin: previousRect, end: currentRect),
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeInOutCubic,
-            onEnd: () => onRectSettled(currentRect),
-            builder: (context, rect, _) {
-              return Stack(
-                children: [
-                  Positioned.fill(
+        child: TweenAnimationBuilder<Rect?>(
+          tween: RectTween(begin: previousRect, end: currentRect),
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeInOutCubic,
+          onEnd: () => onRectSettled(currentRect),
+          builder: (context, rect, _) {
+            return Stack(
+              children: [
+                // Bottom-most sibling: tapping the dimmed background always
+                // ends the tour, no matter what internal state this widget is
+                // in. Deliberately a Stack sibling rather than a GestureDetector
+                // wrapping the card/close button — Stack hit-tests top to
+                // bottom and stops at the first widget that consumes the tap,
+                // so a tap that lands on the card's own Next/Back/Skip buttons
+                // (painted later, so hit-tested first) is consumed there and
+                // never ambiguously shared with this layer underneath. Only a
+                // tap that truly misses everything reaches here.
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: controller.skip,
                     child: CustomPaint(painter: _SpotlightPainter(rect: resolving ? null : rect, scrim: scrim)),
                   ),
-                  if (!resolving) _TourCard(step: step, controller: controller, targetRect: rect, screenSize: size),
-                ],
-              );
-            },
-          ),
+                ),
+                if (!resolving) _TourCard(step: step, controller: controller, targetRect: rect, screenSize: size),
+                // Always present, even while resolving — a second, unmissable
+                // way out regardless of everything else.
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top + 10,
+                  right: 14,
+                  child: Material(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: controller.skip,
+                      child: const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
