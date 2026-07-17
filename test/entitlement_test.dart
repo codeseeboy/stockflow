@@ -42,6 +42,29 @@ void main() {
     });
   });
 
+  group('calendarWeekOf', () {
+    test('numbers Monday–Sunday weeks within the month, Week 1 containing the 1st', () {
+      // July 2026: the 1st is a Wednesday, so Week 1 = Mon 29 Jun – Sun 5 Jul.
+      final w1 = calendarWeekOf(DateTime(2026, 7, 1));
+      expect(w1.number, 1);
+      expect(w1.start, DateTime(2026, 6, 29));
+      expect(w1.end, DateTime(2026, 7, 5));
+
+      final w2 = calendarWeekOf(DateTime(2026, 7, 8));
+      expect(w2.number, 2);
+      expect(w2.start, DateTime(2026, 7, 6));
+      expect(w2.end, DateTime(2026, 7, 12));
+    });
+
+    test('a month starting on Monday makes Week 1 = day 1..7', () {
+      // 2026-06-01 is a Monday.
+      final w1 = calendarWeekOf(DateTime(2026, 6, 3));
+      expect(w1.number, 1);
+      expect(w1.start, DateTime(2026, 6, 1));
+      expect(w1.end, DateTime(2026, 6, 7));
+    });
+  });
+
   group('CategoryBalance', () {
     test('remaining = allowance + carriedIn − consumed, floored at 0', () {
       const b = CategoryBalance(category: 'Cereals', unit: 'kg', allowance: 500, carriedIn: 300, consumed: 200);

@@ -126,6 +126,28 @@ bool itemAllowedIn(DemandType type, String category, String itemName) {
   };
 }
 
+/// A Monday–Sunday calendar week, numbered within the month it's shown under
+/// (Week 1 = the week containing the 1st, even if it starts in the previous
+/// month — the same convention most calendar apps use).
+class CalendarWeek {
+  final int number;
+  final DateTime start;
+  final DateTime end;
+  const CalendarWeek(this.number, this.start, this.end);
+}
+
+/// The calendar week [date] falls in, numbered within its own month.
+CalendarWeek calendarWeekOf(DateTime date) {
+  final monthStart = DateTime(date.year, date.month, 1);
+  final firstWeekday = monthStart.weekday; // Mon=1..Sun=7
+  final week1Start = monthStart.subtract(Duration(days: firstWeekday - 1));
+  final d = DateTime(date.year, date.month, date.day);
+  final weeksSince = d.difference(week1Start).inDays ~/ 7;
+  final start = week1Start.add(Duration(days: weeksSince * 7));
+  final end = start.add(const Duration(days: 6));
+  return CalendarWeek(weeksSince + 1, start, end);
+}
+
 /// One category's entitlement position for a customer in a month. This — not
 /// warehouse stock — is what the customer sees and what caps their order.
 class CategoryBalance {

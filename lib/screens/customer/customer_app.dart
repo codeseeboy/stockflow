@@ -500,9 +500,7 @@ class _HomeTab extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _HomeGreeting(name: displayName),
-              const SizedBox(height: 22),
-              const _SectionLabel('CURRENT DEMAND'),
-              const SizedBox(height: 8),
+              const SizedBox(height: 18),
               _OrderStatusCard(store: store, designation: designation, onOrderNow: onOrderNow),
               const SizedBox(height: 22),
               const _SectionLabel('YOUR BALANCE'),
@@ -576,6 +574,7 @@ class _BalanceSnapshot extends StatelessWidget {
 
     final remaining = balances.fold<double>(0, (s, b) => s + b.remaining);
     final total = balances.fold<double>(0, (s, b) => s + b.total);
+    final carried = balances.fold<double>(0, (s, b) => s + b.carriedIn);
     final ratio = total <= 0 ? 0.0 : (remaining / total).clamp(0.0, 1.0);
 
     return AppCard(
@@ -611,6 +610,12 @@ class _BalanceSnapshot extends StatelessWidget {
                 ),
                 const SizedBox(height: 7),
                 UsageBar(used01: 1 - ratio, height: 6),
+                // Carry-forward must always be visible — this is the figure
+                // that rolled in from last month's leftover.
+                if (carried > 0) ...[
+                  const SizedBox(height: 8),
+                  Pill('+${fmtNum(carried)} carried from ${month.previous.shortLabel}', color: AppColors.accent, icon: Icons.move_up_rounded),
+                ],
               ],
             ),
           ),
@@ -648,6 +653,10 @@ class _HomeGreeting extends StatelessWidget {
   }
 }
 
+/// The calendar-anchored heart of Home: which month and week we're in, and
+/// what that means for ordering right now. Everything in this app revolves
+/// around the monthly entitlement and the weekly demand window, so this card
+/// leads with the calendar, not a generic status pill.
 class _OrderStatusCard extends StatelessWidget {
   final AppStore store;
   final String designation;
@@ -657,22 +666,31 @@ class _OrderStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final dark = scheme.brightness == Brightness.dark;
+    final now = DateTime.now();
+
     final windows = store.openCyclesFor(designation);
     final open = windows.isNotEmpty && store.items.isNotEmpty;
     final multi = windows.length > 1;
     final cycle = windows.isNotEmpty ? windows.first : null;
-    final scheme = Theme.of(context).colorScheme;
-    final dark = scheme.brightness == Brightness.dark;
-
-    final washOpen = dark ? AppColors.dSuccessWash : AppColors.successWash;
     final fresh = cycle?.type == DemandType.fresh;
 
-    // Closing moment = end of the demand's last day.
+    // Always-visible calendar context: "July 2026" / "Week 2 · Mon 6 – Sun 12 Jul".
+    final month = store.currentMonth;
+    final week = calendarWeekOf(now);
+    final weekRange = week.start.month == week.end.month
+        ? 'Mon ${DateFormat('d').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}'
+        : 'Mon ${DateFormat('d MMM').format(week.start)} – Sun ${DateFormat('d MMM').format(week.end)}';
+
+    // The demand's own window (its actual dates, whatever span the admin set).
     final closesAt = cycle == null
         ? null
         : DateTime(cycle.weekEnd.year, cycle.weekEnd.month, cycle.weekEnd.day, 23, 59);
-    final closeLine = closesAt == null ? '' : DateFormat('EEE, d MMM · h:mm a').format(closesAt);
-    final leftDur = closesAt?.difference(DateTime.now());
+    final windowRange = cycle == null
+        ? ''
+        : '${DateFormat('EEE, d MMM').format(cycle.weekStart)} – ${DateFormat('EEE, d MMM').format(cycle.weekEnd)}';
+    final leftDur = closesAt?.difference(now);
     final String countdown;
     if (leftDur == null || leftDur.isNegative) {
       countdown = 'closing';
@@ -688,61 +706,62 @@ class _OrderStatusCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: open ? washOpen : scheme.surfaceContainerHighest,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(AppRadius.xl),
-        border: Border.all(
-          color: open ? AppColors.success.withValues(alpha: 0.4) : scheme.outline,
-        ),
+        border: Border.all(color: scheme.outline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ---- Calendar context: always visible, regardless of demand state ----
           Row(
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: open ? AppColors.success.withValues(alpha: 0.16) : scheme.outline.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                child: Icon(
-                  open ? (fresh ? Icons.eco_rounded : Icons.grain_rounded) : Icons.lock_clock_rounded,
-                  color: open ? AppColors.success : scheme.onSurfaceVariant,
-                  size: 24,
-                ),
+              Icon(Icons.calendar_today_rounded, size: 16, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Text(month.label, style: t.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.only(left: 24),
+            child: Text('Week ${week.number} · $weekRange', style: t.bodyMedium),
+          ),
+          const SizedBox(height: 14),
+          Divider(color: scheme.outline, height: 1),
+          const SizedBox(height: 14),
+
+          // ---- Demand window state ----
+          Row(
+            children: [
+              Icon(
+                open ? (fresh ? Icons.eco_rounded : Icons.grain_rounded) : Icons.lock_clock_rounded,
+                size: 17,
+                color: open ? AppColors.success : scheme.onSurfaceVariant,
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 8),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      open
-                          ? (multi ? '${windows.length} demands open' : '${cycle!.type.label} demand open')
-                          : 'Demand not started',
-                      style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      open
-                          ? (multi ? 'Pick one on the Order tab' : 'Covers ${cycle!.days} days of ration')
-                          : 'You will be notified when it opens',
-                      style: t.bodySmall,
-                    ),
-                  ],
+                child: Text(
+                  open
+                      ? (multi ? '${windows.length} demand windows open' : '${cycle!.type.label} demand window open')
+                      : 'Demand window closed',
+                  style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
               Pill(open ? 'OPEN' : 'CLOSED', color: open ? AppColors.success : scheme.onSurfaceVariant),
             ],
           ),
-          if (open && !multi && closesAt != null) ...[
-            const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          if (open && !multi && cycle != null) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 25),
+              child: Text(windowRange, style: t.bodySmall),
+            ),
+            const SizedBox(height: 10),
             // The closing moment — highlighted, with a live countdown.
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               decoration: BoxDecoration(
-                color: scheme.surface,
+                color: dark ? AppColors.dSurfaceMuted : scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(AppRadius.md),
                 border: Border.all(color: (closingSoon ? AppColors.danger : AppColors.success).withValues(alpha: 0.35)),
               ),
@@ -751,20 +770,45 @@ class _OrderStatusCard extends StatelessWidget {
                   Icon(Icons.schedule_rounded, size: 17, color: closingSoon ? AppColors.danger : AppColors.success),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text('Closes $closeLine', style: t.titleSmall?.copyWith(fontSize: 13)),
+                    child: Text('Closes ${DateFormat('EEE, d MMM · h:mm a').format(closesAt!)}', style: t.titleSmall?.copyWith(fontSize: 13)),
                   ),
                   Pill(countdown, color: closingSoon ? AppColors.danger : AppColors.success, icon: Icons.hourglass_bottom_rounded),
                 ],
               ),
             ),
-          ],
-          if (open) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
                 onPressed: onOrderNow,
                 child: const Text('Place demand'),
+              ),
+            ),
+          ] else if (open && multi) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 25),
+              child: Text('Pick one on the Order tab', style: t.bodySmall),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: onOrderNow,
+                child: const Text('Place demand'),
+              ),
+            ),
+          ] else ...[
+            // Closed: no future demand is scheduled ahead of time in this
+            // system — the unit opens the next one when they're ready — so
+            // this is honestly "to be announced" rather than a guessed date.
+            Padding(
+              padding: const EdgeInsets.only(left: 25),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 14, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text('Next window: TBD — you\'ll be notified when it opens', style: t.bodySmall)),
+                ],
               ),
             ),
           ],

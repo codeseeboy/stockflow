@@ -2,7 +2,7 @@
 REM ============================================================
 REM StockFlow — run on a USB-connected phone (debug, hot reload)
 REM Checks: adb present, phone plugged in, USB debugging allowed.
-REM Hot reload: press r in this window. Quit: press q.
+REM Hot reload: press r in this window. Quit: press q. .\run-web.bat
 REM ============================================================
 cd /d "%~dp0.."
 setlocal
